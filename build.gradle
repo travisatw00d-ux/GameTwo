@@ -1,0 +1,24 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+def jmeVersion = '3.3.2-stable'
+
+dependencies {
+    implementation "org.jmonkeyengine:jme3-core:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-desktop:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-lwjgl:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-bullet:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-bullet-native:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-plugins:$jmeVersion"
+    implementation "org.jmonkeyengine:jme3-effects:$jmeVersion"
+}
+
+application {
+    mainClass = 'com.game.Main'
+}
