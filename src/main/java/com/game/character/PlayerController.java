@@ -8,8 +8,6 @@ import com.jme3.input.MouseInput;
 import com.jme3.input.controls.ActionListener;
 import com.jme3.input.controls.KeyTrigger;
 import com.jme3.input.controls.MouseButtonTrigger;
-import com.jme3.math.FastMath;
-import com.jme3.math.Quaternion;
 import com.jme3.math.Vector3f;
 import com.jme3.scene.Node;
 
@@ -34,9 +32,7 @@ public class PlayerController {
 
     private float moveSpeed = 5f;
     private float walkSpeedMult = 0.55f;
-    private float sidestepSpeedMult = 0.35f;
-    private float rotationSpeed = 9f;
-
+    private float sidestepSpeedMult = 0.22f;
     private static final Vector3f[] DIR_CACHE = new Vector3f[4];
     static {
         DIR_CACHE[0] = new Vector3f(0f, 0f, -1f);
@@ -82,10 +78,6 @@ public class PlayerController {
 
     public void setMoveSpeed(float moveSpeed) {
         this.moveSpeed = moveSpeed;
-    }
-
-    public void setRotationSpeed(float rotationSpeed) {
-        this.rotationSpeed = rotationSpeed;
     }
 
     public CharacterState getState() {
@@ -150,7 +142,6 @@ public class PlayerController {
                 default       -> 1f;
             };
             physicsControl.setWalkDirection(direction.mult(moveSpeed * speedMult));
-            rotateToward(direction, tpf);
         } else {
             physicsControl.setWalkDirection(Vector3f.ZERO);
         }
@@ -220,6 +211,8 @@ public class PlayerController {
         footIK.setLeftLockHint(animator.shouldLockFoot(true));
         footIK.setRightLockHint(animator.shouldLockFoot(false));
         footIK.update(tpf);
+
+
     }
 
     public Node getPhysicsNode() {
@@ -237,13 +230,6 @@ public class PlayerController {
         if (moveLeft)     dir.addLocal(DIR_CACHE[2]);
         if (moveRight)    dir.addLocal(DIR_CACHE[3]);
         return dir;
-    }
-
-    private void rotateToward(Vector3f direction, float tpf) {
-        Quaternion target = new Quaternion().lookAt(direction.mult(-1f), Vector3f.UNIT_Y);
-        Quaternion current = characterNode.getLocalRotation();
-        float amount = FastMath.clamp(rotationSpeed * tpf, 0f, 1f);
-        characterNode.setLocalRotation(new Quaternion().slerp(current, target, amount));
     }
 
     private final ActionListener actionListener = (name, keyPressed, tpf) -> {
