@@ -47,10 +47,47 @@ public class ProceduralHumanoid {
         }
 
         rig = new HumanoidRig(armature);
+
+        // DEBUG: print loaded joint rotations to verify rest pose
+        System.out.println("=== Joint rest-pose rotations ===");
+        String[] checkJoints = {"Root", "Hips", "Spine", "Chest", "Neck", "Head",
+            "Clavicle.L", "Upper_Arm.L",             "Lower_Arm.L", "Hand.L",
+            "Clavicle.R", "Upper_Arm.R", "Lower_Arm.R", "Hand.R"};
+        for (String name : checkJoints) {
+            Joint j = armature.getJoint(name);
+            if (j != null) {
+                com.jme3.math.Quaternion q = j.getLocalRotation();
+                System.out.println("  " + name + ": [" + q.getX() + ", " + q.getY() + ", " + q.getZ() + ", " + q.getW() + "]");
+            } else {
+                System.out.println("  " + name + ": JOINT NOT FOUND");
+            }
+        }
+
         armature.saveInitialPose();
+
+        // Fix over-metallic materials from Blender export
+        fixMaterials(rootNode);
 
         this.characterNode = rootNode;
         this.armatureNode = findArmatureNode(rootNode);
+    }
+
+    private static void fixMaterials(Spatial spatial) {
+        if (spatial instanceof Geometry g) {
+            com.jme3.material.Material mat = g.getMaterial();
+            if (mat != null && mat.getMaterialDef() != null) {
+                String def = mat.getMaterialDef().getName();
+                if (def != null && def.contains("PBR")) {
+                    mat.setFloat("Metallic", 0.0f);
+                    mat.setFloat("Roughness", 0.8f);
+                }
+            }
+        }
+        if (spatial instanceof Node node) {
+            for (Spatial child : node.getChildren()) {
+                fixMaterials(child);
+            }
+        }
     }
 
     public void attachHair(AssetManager am, String modelPath) {

@@ -1,5 +1,6 @@
 package com.game.character;
 
+import com.jme3.anim.Joint;
 import com.jme3.math.FastMath;
 import com.jme3.math.Quaternion;
 import com.jme3.math.Vector3f;
@@ -11,9 +12,9 @@ public class SkeletonAnimator {
     }
 
     private final HumanoidRig rig;
+    private final BasePose basePose;
     private AnimationType currentAnim = AnimationType.IDLE;
     private float timer = 0f;
-    private final Vector3f restHipsPos;
 
     private float walkSpeed = 10f;
     private float walkSwing = 0.55f;
@@ -28,15 +29,14 @@ public class SkeletonAnimator {
     private float sidestepSpeed = 1.5f;
     private float walkSign = 1f;
     private final Vector3f restRootPos;
+    private boolean firstFrame = true;
 
-    private static final Quaternion IDENTITY = new Quaternion();
     private static final Vector3f AXIS_X = new Vector3f(1f, 0f, 0f);
     private static final Vector3f AXIS_Z = new Vector3f(0f, 0f, 1f);
-    private static final Vector3f AXIS_NEG_Z = new Vector3f(0f, 0f, -1f);
 
     public SkeletonAnimator(HumanoidRig rig) {
         this.rig = rig;
-        this.restHipsPos = rig.getHips().getLocalTranslation().clone();
+        this.basePose = new BasePose(rig.getArmature());
         this.restRootPos = rig.getRoot().getLocalTranslation().clone();
     }
 
@@ -97,31 +97,66 @@ public class SkeletonAnimator {
     public void update(float tpf) {
         timer += tpf;
 
-        rig.resetToInitialPose();
+        basePose.apply(rig);
+
+        if (firstFrame) {
+            firstFrame = false;
+            rig.getArmature().update();
+
+            String[] armJoints = {"Clavicle.L", "Upper_Arm.L", "Lower_Arm.L", "Hand.L",
+                                  "Clavicle.R", "Upper_Arm.R", "Lower_Arm.R", "Hand.R"};
+            Vector3f[] pos = new Vector3f[8];
+            for (int i = 0; i < armJoints.length; i++) {
+                Joint j = rig.get(armJoints[i]);
+                pos[i] = j != null ? j.getModelTransform().getTranslation(new Vector3f()) : Vector3f.ZERO;
+            }
+
+            System.out.println("[ARM_CHAIN] L: Clavicle=" + pos[0]
+                + " UpperArm=" + pos[1] + " LowerArm=" + pos[2] + " Hand=" + pos[3]);
+            System.out.println("[ARM_CHAIN] R: Clavicle=" + pos[4]
+                + " UpperArm=" + pos[5] + " LowerArm=" + pos[6] + " Hand=" + pos[7]);
+
+            Vector3f ueL = pos[2].subtract(pos[1]).normalizeLocal();
+            Vector3f ehL = pos[3].subtract(pos[2]).normalizeLocal();
+            Vector3f ueR = pos[6].subtract(pos[5]).normalizeLocal();
+            Vector3f ehR = pos[7].subtract(pos[6]).normalizeLocal();
+
+            System.out.println("[ARM_CHAIN] L: UpperArm\u2192Elbow=" + ueL + " Elbow\u2192Hand=" + ehL);
+            System.out.println("[ARM_CHAIN] R: UpperArm\u2192Elbow=" + ueR + " Elbow\u2192Hand=" + ehR);
+        }
 
         switch (currentAnim) {
-            case IDLE     -> updateIdle(tpf);
-            case WALK     -> updateWalk(tpf);
-            case ATTACK   -> updateAttack(tpf);
+            case IDLE -> updateIdle(tpf);
+            case WALK -> updateWalk(tpf);
+            case ATTACK -> updateAttack(tpf);
             case SIDESTEP -> updateSidestep(tpf);
         }
     }
+
+    // ─── IDLE ───────────────────────────────────────────────
 
     private void updateIdle(float tpf) {
         float breath = FastMath.sin(timer * idleSwaySpeed) * idleSwayAmount;
 
         rig.getSpine().setLocalRotation(
-            rig.getSpine().getLocalRotation().mult(new Quaternion().fromAngles(breath * 0.3f, 0f, breath * 0.5f)));
+            rig.getSpine().getLocalRotation().mult(
+                new Quaternion().fromAngles(breath * 0.3f, 0f, breath * 0.5f)));
+
+        float armAngle = breath * 0.2f;
 
         rig.getUpperArmL().setLocalRotation(
-            rig.getUpperArmL().getLocalRotation().mult(new Quaternion().fromAngleAxis(breath * 0.2f, AXIS_X)));
-
+            rig.getUpperArmL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(armAngle, AXIS_Z)));
         rig.getUpperArmR().setLocalRotation(
-            rig.getUpperArmR().getLocalRotation().mult(new Quaternion().fromAngleAxis(-breath * 0.2f, AXIS_X)));
+            rig.getUpperArmR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(-armAngle, AXIS_Z)));
 
         rig.getHead().setLocalRotation(
-            rig.getHead().getLocalRotation().mult(new Quaternion().fromAngleAxis(breath * 0.1f, AXIS_X)));
+            rig.getHead().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(breath * 0.1f, AXIS_X)));
     }
+
+    // ─── WALK ───────────────────────────────────────────────
 
     private void updateWalk(float tpf) {
         float cycle = timer * walkSpeed;
@@ -131,29 +166,38 @@ public class SkeletonAnimator {
 
         float leftLeg  = FastMath.sin(cycle) * walkSwing * dir;
         float rightLeg = FastMath.sin(cycle + FastMath.PI) * walkSwing * dir;
-        float armSwing = forward ? walkSwing * 1.3f : walkSwing * 0.7f;
-        float leftArm  = FastMath.sin(cycle + FastMath.PI) * armSwing;
-        float rightArm = FastMath.sin(cycle) * armSwing;
+        float aSwing = forward ? walkSwing * 1.3f : walkSwing * 0.7f;
+        float leftArm  = FastMath.sin(cycle + FastMath.PI) * aSwing;
+        float rightArm = FastMath.sin(cycle) * aSwing;
 
         float liftStrength = 0.40f;
-        float leftShinLift  = FastMath.clamp(FastMath.sin(cycle) * dir * liftStrength, 0f, liftStrength);
-        float rightShinLift = FastMath.clamp(FastMath.sin(cycle + FastMath.PI) * dir * liftStrength, 0f, liftStrength);
+        float leftShin = FastMath.clamp(FastMath.sin(cycle) * dir * liftStrength, 0f, liftStrength);
+        float rightShin = FastMath.clamp(
+            FastMath.sin(cycle + FastMath.PI) * dir * liftStrength, 0f, liftStrength);
 
         rig.getLegL().setLocalRotation(
-            rig.getLegL().getLocalRotation().mult(new Quaternion().fromAngleAxis(leftLeg, AXIS_Z)));
+            rig.getLegL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(leftLeg, AXIS_Z)));
         rig.getLegR().setLocalRotation(
-            rig.getLegR().getLocalRotation().mult(new Quaternion().fromAngleAxis(rightLeg, AXIS_NEG_Z)));
-        rig.getUpperArmL().setLocalRotation(
-            rig.getUpperArmL().getLocalRotation().mult(new Quaternion().fromAngleAxis(leftArm, AXIS_X)));
-        rig.getUpperArmR().setLocalRotation(
-            rig.getUpperArmR().getLocalRotation().mult(new Quaternion().fromAngleAxis(rightArm, AXIS_X)));
+            rig.getLegR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(rightLeg, AXIS_Z)));
 
         rig.getShinL().setLocalRotation(
-            rig.getShinL().getLocalRotation().mult(new Quaternion().fromAngleAxis(leftShinLift, AXIS_Z)));
+            rig.getShinL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(leftShin, AXIS_Z)));
         rig.getShinR().setLocalRotation(
-            rig.getShinR().getLocalRotation().mult(new Quaternion().fromAngleAxis(rightShinLift, AXIS_NEG_Z)));
+            rig.getShinR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(rightShin, AXIS_Z)));
 
+        rig.getUpperArmL().setLocalRotation(
+            rig.getUpperArmL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(leftArm, AXIS_Z)));
+        rig.getUpperArmR().setLocalRotation(
+            rig.getUpperArmR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(rightArm, AXIS_Z)));
     }
+
+    // ─── ATTACK ─────────────────────────────────────────────
 
     private void updateAttack(float tpf) {
         float p = timer / attackDuration;
@@ -167,32 +211,34 @@ public class SkeletonAnimator {
         float swing = FastMath.sin(p * FastMath.PI) * attackSwing;
         float twist = FastMath.sin(p * FastMath.PI) * attackTwist;
 
-        Quaternion rightArmRot = rig.getUpperArmR().getLocalRotation();
-        rightArmRot = rightArmRot.mult(new Quaternion().fromAngleAxis(-swing, AXIS_X));
-        rightArmRot = rightArmRot.mult(new Quaternion().fromAngleAxis(twist, AXIS_Z));
-        rig.getUpperArmR().setLocalRotation(rightArmRot);
+        Quaternion rArm = rig.getUpperArmR().getLocalRotation();
+        rArm = rArm.mult(new Quaternion().fromAngleAxis(-swing, AXIS_Z));
+        rArm = rArm.mult(new Quaternion().fromAngleAxis(twist, AXIS_X));
+        rig.getUpperArmR().setLocalRotation(rArm);
 
         rig.getUpperArmL().setLocalRotation(
-            rig.getUpperArmL().getLocalRotation().mult(new Quaternion().fromAngleAxis(swing * 0.15f, AXIS_X)));
+            rig.getUpperArmL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(swing * 0.15f, AXIS_Z)));
 
         rig.getSpine().setLocalRotation(
-            rig.getSpine().getLocalRotation().mult(new Quaternion().fromAngleAxis(-twist * 0.3f, AXIS_Z)));
+            rig.getSpine().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(-twist * 0.3f, AXIS_X)));
         rig.getHead().setLocalRotation(
-            rig.getHead().getLocalRotation().mult(new Quaternion().fromAngleAxis(twist * 0.2f, AXIS_X)));
+            rig.getHead().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(twist * 0.2f, AXIS_X)));
     }
+
+    // ─── SIDESTEP ───────────────────────────────────────────
 
     private void updateSidestep(float tpf) {
         float cycle = timer * sidestepSpeed;
         float t = cycle % 1.0f;
 
-        // 20-frame keyframes: 5 equal phases
         float phase = t / 0.2f;
         int idx = (int) phase;
         float frac = phase - idx;
         float e = smoothstep(frac);
 
-        // Keyframe values for RIGHT sidestep (lead = right leg)
-        // t:          0.0    0.2    0.4    0.6    0.8    1.0
         float[] rootShiftK = { 0f,    -0.20f,  -0.20f,  -0.10f, 0f,    0f };
         float[] hipTiltK   = { 0f,     0.10f,   0.10f,   0.05f,  0f,    0f };
         float[] thighRAbdK = { 0f,     0f,      0.35f,   0.18f,  0f,    0f };
@@ -215,7 +261,6 @@ public class SkeletonAnimator {
         float footL     = lerp(footLK[k],     footLK[k + 1],     e);
         float footLift  = lerp(footLiftK[k],  footLiftK[k + 1],  e);
 
-        // Mirror for LEFT sidestep (lead = left leg)
         if (sidestepLeft) {
             rootShift = -rootShift;
             hipTilt = -hipTilt;
@@ -224,7 +269,6 @@ public class SkeletonAnimator {
             tmp = footL; footL = -footR; footR = -tmp;
         }
 
-        // Foot lift: bend stepping foot's knee so it clears the ground
         if (sidestepLeft) {
             shinL += footLift;
         } else {
@@ -237,22 +281,29 @@ public class SkeletonAnimator {
         rig.getRoot().setLocalTranslation(rootPos);
 
         rig.getHips().setLocalRotation(
-            rig.getHips().getLocalRotation().mult(new Quaternion().fromAngleAxis(hipTilt, AXIS_Z)));
+            rig.getHips().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(hipTilt, AXIS_X)));
 
         rig.getLegL().setLocalRotation(
-            rig.getLegL().getLocalRotation().mult(new Quaternion().fromAngleAxis(thighLAbd, AXIS_X)));
+            rig.getLegL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(thighLAbd, AXIS_Z)));
         rig.getLegR().setLocalRotation(
-            rig.getLegR().getLocalRotation().mult(new Quaternion().fromAngleAxis(thighRAbd, AXIS_X)));
+            rig.getLegR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(thighRAbd, AXIS_Z)));
 
         rig.getShinR().setLocalRotation(
-            rig.getShinR().getLocalRotation().mult(new Quaternion().fromAngleAxis(shinR, AXIS_NEG_Z)));
+            rig.getShinR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(shinR, AXIS_Z)));
         rig.getFootR().setLocalRotation(
-            rig.getFootR().getLocalRotation().mult(new Quaternion().fromAngleAxis(footR, AXIS_NEG_Z)));
+            rig.getFootR().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(footR, AXIS_Z)));
 
         rig.getShinL().setLocalRotation(
-            rig.getShinL().getLocalRotation().mult(new Quaternion().fromAngleAxis(shinL, AXIS_Z)));
+            rig.getShinL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(shinL, AXIS_Z)));
         rig.getFootL().setLocalRotation(
-            rig.getFootL().getLocalRotation().mult(new Quaternion().fromAngleAxis(footL, AXIS_Z)));
+            rig.getFootL().getLocalRotation().mult(
+                new Quaternion().fromAngleAxis(footL, AXIS_Z)));
     }
 
     private static float lerp(float a, float b, float t) {
