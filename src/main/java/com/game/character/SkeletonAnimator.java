@@ -18,6 +18,7 @@ public class SkeletonAnimator {
 
     private float walkSpeed = 10f;
     private float walkSwing = 0.55f;
+    private float kneeBendStrength = 0.40f;
     private float walkBob = 0.04f;
     private float idleSwaySpeed = 1.2f;
     private float idleSwayAmount = 0.03f;
@@ -139,7 +140,9 @@ public class SkeletonAnimator {
         // Apply the SAME angle to both sides — the mirroring produces opposite world motion.
         float legAngle = -FastMath.sin(cycle) * walkSwing * dir;
         float armAngle = -legAngle * (dir > 0f ? 1.3f : 0.7f);
-        float shinK = FastMath.clamp(-legAngle * (0.40f / walkSwing), 0f, 0.40f);
+        float swing = FastMath.sin(cycle) * dir;
+        float kneeBend = Math.max(0f, -swing);
+        float shinAngle = kneeBend * kneeBendStrength;
 
         rig.getLegL().setLocalRotation(
             rig.getLegL().getLocalRotation().mult(
@@ -150,10 +153,10 @@ public class SkeletonAnimator {
 
         rig.getShinL().setLocalRotation(
             rig.getShinL().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(shinK, AXIS_Z)));
+                new Quaternion().fromAngleAxis(shinAngle, AXIS_Z)));
         rig.getShinR().setLocalRotation(
             rig.getShinR().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(shinK, AXIS_Z)));
+                new Quaternion().fromAngleAxis(shinAngle, AXIS_Z)));
 
         rig.getUpperArmL().setLocalRotation(
             rig.getUpperArmL().getLocalRotation().mult(
