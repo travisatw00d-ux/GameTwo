@@ -157,10 +157,10 @@ public class SkeletonAnimator {
 
         rig.getUpperArmL().setLocalRotation(
             rig.getUpperArmL().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(armAngle, AXIS_Z)));
+                new Quaternion().fromAngleAxis(armAngle, AXIS_X)));
         rig.getUpperArmR().setLocalRotation(
             rig.getUpperArmR().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(armAngle, AXIS_Z)));
+                new Quaternion().fromAngleAxis(-armAngle, AXIS_X)));
     }
 
     // ─── ATTACK ─────────────────────────────────────────────
