@@ -29,7 +29,6 @@ public class SkeletonAnimator {
     private float sidestepSpeed = 1.5f;
     private float walkSign = 1f;
     private final Vector3f restRootPos;
-    private boolean firstFrame = true;
 
     private static final Vector3f AXIS_X = new Vector3f(1f, 0f, 0f);
     private static final Vector3f AXIS_Z = new Vector3f(0f, 0f, 1f);
@@ -99,32 +98,6 @@ public class SkeletonAnimator {
 
         basePose.apply(rig);
 
-        if (firstFrame) {
-            firstFrame = false;
-            rig.getArmature().update();
-
-            String[] armJoints = {"Clavicle.L", "Upper_Arm.L", "Lower_Arm.L", "Hand.L",
-                                  "Clavicle.R", "Upper_Arm.R", "Lower_Arm.R", "Hand.R"};
-            Vector3f[] pos = new Vector3f[8];
-            for (int i = 0; i < armJoints.length; i++) {
-                Joint j = rig.get(armJoints[i]);
-                pos[i] = j != null ? j.getModelTransform().getTranslation(new Vector3f()) : Vector3f.ZERO;
-            }
-
-            System.out.println("[ARM_CHAIN] L: Clavicle=" + pos[0]
-                + " UpperArm=" + pos[1] + " LowerArm=" + pos[2] + " Hand=" + pos[3]);
-            System.out.println("[ARM_CHAIN] R: Clavicle=" + pos[4]
-                + " UpperArm=" + pos[5] + " LowerArm=" + pos[6] + " Hand=" + pos[7]);
-
-            Vector3f ueL = pos[2].subtract(pos[1]).normalizeLocal();
-            Vector3f ehL = pos[3].subtract(pos[2]).normalizeLocal();
-            Vector3f ueR = pos[6].subtract(pos[5]).normalizeLocal();
-            Vector3f ehR = pos[7].subtract(pos[6]).normalizeLocal();
-
-            System.out.println("[ARM_CHAIN] L: UpperArm\u2192Elbow=" + ueL + " Elbow\u2192Hand=" + ehL);
-            System.out.println("[ARM_CHAIN] R: UpperArm\u2192Elbow=" + ueR + " Elbow\u2192Hand=" + ehR);
-        }
-
         switch (currentAnim) {
             case IDLE -> updateIdle(tpf);
             case WALK -> updateWalk(tpf);
@@ -160,41 +133,34 @@ public class SkeletonAnimator {
 
     private void updateWalk(float tpf) {
         float cycle = timer * walkSpeed;
+        float dir = walkSign < 0f ? 1f : -1f;
 
-        boolean forward = walkSign < 0f;
-        float dir = forward ? -1f : 1f;
-
-        float leftLeg  = FastMath.sin(cycle) * walkSwing * dir;
-        float rightLeg = FastMath.sin(cycle + FastMath.PI) * walkSwing * dir;
-        float aSwing = forward ? walkSwing * 1.3f : walkSwing * 0.7f;
-        float leftArm  = FastMath.sin(cycle + FastMath.PI) * aSwing;
-        float rightArm = FastMath.sin(cycle) * aSwing;
-
-        float liftStrength = 0.40f;
-        float leftShin = FastMath.clamp(FastMath.sin(cycle) * dir * liftStrength, 0f, liftStrength);
-        float rightShin = FastMath.clamp(
-            FastMath.sin(cycle + FastMath.PI) * dir * liftStrength, 0f, liftStrength);
+        // All paired bones (legs, shins, arms) have mirrored local Z axes.
+        // Apply the SAME angle to both sides — the mirroring produces opposite world motion.
+        float legAngle = -FastMath.sin(cycle) * walkSwing * dir;
+        float armAngle = -legAngle * (dir > 0f ? 1.3f : 0.7f);
+        float shinK = FastMath.clamp(-legAngle * (0.40f / walkSwing), 0f, 0.40f);
 
         rig.getLegL().setLocalRotation(
             rig.getLegL().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(leftLeg, AXIS_Z)));
+                new Quaternion().fromAngleAxis(legAngle, AXIS_Z)));
         rig.getLegR().setLocalRotation(
             rig.getLegR().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(rightLeg, AXIS_Z)));
+                new Quaternion().fromAngleAxis(legAngle, AXIS_Z)));
 
         rig.getShinL().setLocalRotation(
             rig.getShinL().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(leftShin, AXIS_Z)));
+                new Quaternion().fromAngleAxis(shinK, AXIS_Z)));
         rig.getShinR().setLocalRotation(
             rig.getShinR().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(rightShin, AXIS_Z)));
+                new Quaternion().fromAngleAxis(shinK, AXIS_Z)));
 
         rig.getUpperArmL().setLocalRotation(
             rig.getUpperArmL().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(leftArm, AXIS_Z)));
+                new Quaternion().fromAngleAxis(armAngle, AXIS_Z)));
         rig.getUpperArmR().setLocalRotation(
             rig.getUpperArmR().getLocalRotation().mult(
-                new Quaternion().fromAngleAxis(rightArm, AXIS_Z)));
+                new Quaternion().fromAngleAxis(armAngle, AXIS_Z)));
     }
 
     // ─── ATTACK ─────────────────────────────────────────────
