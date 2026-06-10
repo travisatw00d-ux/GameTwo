@@ -133,7 +133,7 @@ public class PlayerController {
         if (poseApplier != null && (sidestepActive || sidestepRightActive)) {
             physicsControl.setWalkDirection(Vector3f.ZERO);
             if (!poseApplier.isActive()) {
-                poseApplier.startSequence(sidestepRightActive);
+                poseApplier.startSequence();
             }
             poseApplier.update(tpf);
             return;
