@@ -26,9 +26,11 @@ public class PlayerController {
     private boolean firstUpdate = true;
     private boolean moveForward;
     private boolean moveBackward;
-    private boolean moveLeft;
     private boolean moveRight;
     private boolean attackPressed;
+    private boolean sidestepActive;
+
+    private SideStepPoseApplier poseApplier;
 
     private float moveSpeed = 5f;
     private float walkSpeedMult = 0.55f;
@@ -56,6 +58,8 @@ public class PlayerController {
         this.footIK = new FootIKController(humanoid.getRig(), characterNode);
     }
 
+    public void setPoseApplier(SideStepPoseApplier a) { this.poseApplier = a; }
+
     public CharacterStateMachine getStateMachine() {
         return stateMachine;
     }
@@ -63,12 +67,12 @@ public class PlayerController {
     public void registerInput(InputManager inputManager) {
         inputManager.addMapping("WalkForward",  new KeyTrigger(KeyInput.KEY_W));
         inputManager.addMapping("WalkBackward", new KeyTrigger(KeyInput.KEY_S));
-        inputManager.addMapping("WalkLeft",     new KeyTrigger(KeyInput.KEY_A));
+        inputManager.addMapping("SidestepPose", new KeyTrigger(KeyInput.KEY_A));
         inputManager.addMapping("WalkRight",    new KeyTrigger(KeyInput.KEY_D));
         inputManager.addMapping("Attack",       new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
 
         inputManager.addListener(actionListener,
-                "WalkForward", "WalkBackward", "WalkLeft", "WalkRight", "Attack");
+                "WalkForward", "WalkBackward", "SidestepPose", "WalkRight", "Attack");
     }
 
     public void setupPhysics(BulletAppState bulletAppState) {
@@ -126,6 +130,15 @@ public class PlayerController {
             this.modelHeight = modelH;
         }
 
+        if (poseApplier != null && sidestepActive) {
+            physicsControl.setWalkDirection(Vector3f.ZERO);
+            if (!poseApplier.isActive()) {
+                poseApplier.startSequence();
+            }
+            poseApplier.update(tpf);
+            return;
+        }
+
         if (stateMachine.getCurrentState() == CharacterState.DEAD) {
             physicsControl.setWalkDirection(Vector3f.ZERO);
             return;
@@ -146,7 +159,7 @@ public class PlayerController {
             physicsControl.setWalkDirection(Vector3f.ZERO);
         }
 
-        boolean strafing = (moveLeft || moveRight) && !(moveForward || moveBackward);
+        boolean strafing = moveRight && !(moveForward || moveBackward);
 
         CharacterState current = stateMachine.getCurrentState();
 
@@ -156,7 +169,7 @@ public class PlayerController {
                     animator.playAttack();
                     stateMachine.changeState(CharacterState.ATTACK);
                 } else if (strafing) {
-                    animator.playSidestep(!moveLeft);
+                    animator.playSidestep(false);
                     stateMachine.changeState(CharacterState.SIDESTEP);
                 } else if (moving) {
                     animator.playWalk();
@@ -168,7 +181,7 @@ public class PlayerController {
                     animator.playAttack();
                     stateMachine.changeState(CharacterState.ATTACK);
                 } else if (strafing) {
-                    animator.playSidestep(!moveLeft);
+                    animator.playSidestep(false);
                     stateMachine.changeState(CharacterState.SIDESTEP);
                 } else if (!moving) {
                     animator.playIdle();
@@ -192,7 +205,7 @@ public class PlayerController {
             case ATTACK -> {
                 if (animator.getCurrentAnimation() == SkeletonAnimator.AnimationType.IDLE) {
                     if (strafing) {
-                        animator.playSidestep(!moveLeft);
+                        animator.playSidestep(false);
                         stateMachine.changeState(CharacterState.SIDESTEP);
                     } else if (moving) {
                         animator.playWalk();
@@ -227,7 +240,6 @@ public class PlayerController {
         Vector3f dir = new Vector3f();
         if (moveForward)  dir.addLocal(DIR_CACHE[0]);
         if (moveBackward) dir.addLocal(DIR_CACHE[1]);
-        if (moveLeft)     dir.addLocal(DIR_CACHE[2]);
         if (moveRight)    dir.addLocal(DIR_CACHE[3]);
         return dir;
     }
@@ -236,7 +248,12 @@ public class PlayerController {
         switch (name) {
             case "WalkForward"  -> moveForward  = keyPressed;
             case "WalkBackward" -> moveBackward = keyPressed;
-            case "WalkLeft"     -> moveLeft     = keyPressed;
+            case "SidestepPose" -> {
+                sidestepActive = keyPressed;
+                if (!keyPressed && poseApplier != null) {
+                    poseApplier.stopSequence();
+                }
+            }
             case "WalkRight"    -> moveRight    = keyPressed;
             case "Attack"       -> attackPressed = keyPressed;
         }

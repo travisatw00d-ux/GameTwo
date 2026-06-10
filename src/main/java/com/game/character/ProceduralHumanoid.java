@@ -196,6 +196,10 @@ public class ProceduralHumanoid {
         return characterNode;
     }
 
+    public Node getArmatureNode() {
+        return armatureNode;
+    }
+
     public HumanoidRig getRig() {
         return rig;
     }

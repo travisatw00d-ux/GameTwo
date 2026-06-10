@@ -1,12 +1,13 @@
 package com.game;
 
 import com.game.character.CharacterFactory;
-import com.game.character.CharacterState;
 import com.game.character.PlayerController;
 import com.game.character.ProceduralHumanoid;
+import com.game.character.SideStepPoseApplier;
 import com.game.character.SkeletonAnimator;
 import com.game.world.SceneSetup;
 import com.game.world.TrainingDummy;
+import com.jme3.anim.AnimComposer;
 import com.jme3.app.SimpleApplication;
 import com.jme3.bullet.BulletAppState;
 import com.jme3.bullet.control.RigidBodyControl;
@@ -15,8 +16,12 @@ import com.jme3.math.ColorRGBA;
 import com.jme3.math.Vector3f;
 import com.jme3.asset.plugins.FileLocator;
 import com.jme3.scene.Geometry;
+import com.jme3.scene.Node;
+import com.jme3.scene.Spatial;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.AppSettings;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 public class Main extends SimpleApplication {
 
@@ -26,6 +31,7 @@ public class Main extends SimpleApplication {
     private SkeletonAnimator playerAnim;
     private TrainingDummy dummy;
     private GraphicsSettings gfx;
+    private SideStepPoseApplier poseApplier;
 
     public static void main(String[] args) {
         Main app = new Main();
@@ -88,9 +94,26 @@ public class Main extends SimpleApplication {
         playerController = new PlayerController(playerHumanoid, playerAnim);
         rootNode.attachChild(playerController.getPhysicsNode());
         playerHumanoid.enableShadows();
+        disableAnimationControls(playerHumanoid.getCharacter());
 
         playerController.registerInput(inputManager);
         playerController.setupPhysics(bulletAppState);
+
+        // ── SIDESTEP POSE SEQUENCE ──
+        try {
+            poseApplier = new SideStepPoseApplier(playerHumanoid.getRig());
+            poseApplier.addPose("lift",  new String(Files.readAllBytes(Paths.get("Assets/Models/SideStepLift.json"))));
+            poseApplier.addPose("lift2", new String(Files.readAllBytes(Paths.get("Assets/Models/SideStepLift2.json"))));
+            poseApplier.addPose("lift3", new String(Files.readAllBytes(Paths.get("Assets/Models/SideStepLift3.json"))));
+            poseApplier.addPose("plant", new String(Files.readAllBytes(Paths.get("Assets/Models/SideStePlant.json"))));
+            playerController.setPoseApplier(poseApplier);
+
+            playerAnim.setEnabled(false);
+            poseApplier.captureRestPose();
+            playerAnim.setEnabled(true);
+        } catch (Exception e) {
+            System.err.println("FAIL: Could not load pose JSON files - " + e.getMessage());
+        }
 
         // Training dummy
         dummy = new TrainingDummy(assetManager);
@@ -119,19 +142,24 @@ public class Main extends SimpleApplication {
         playerController.update(tpf);
         dummy.update(tpf);
 
-        // Camera follows player
         Vector3f pos = playerHumanoid.getCharacter().getWorldTranslation();
         float camLookY = playerController.getModelHeight() * 0.6f;
         cam.setLocation(pos.add(0f, camLookY + 2f, 6f));
         cam.lookAt(pos.add(0f, camLookY, 0f), Vector3f.UNIT_Y);
 
-        // Auto-damage dummy when player attacks nearby
-        if (playerController.getState() == CharacterState.ATTACK) {
-            float dist = playerHumanoid.getCharacter()
-                    .getWorldTranslation().distance(dummy.getCharacter().getLocalTranslation());
-            if (dist < 4f) {
-                dummy.takeDamage(15f * tpf);
+    }
+
+    private static void disableAnimationControls(Spatial spatial) {
+        AnimComposer composer = spatial.getControl(AnimComposer.class);
+        if (composer != null) {
+            composer.setEnabled(false);
+            System.out.println("Disabled AnimComposer on " + spatial.getName());
+        }
+        if (spatial instanceof Node node) {
+            for (Spatial child : node.getChildren()) {
+                disableAnimationControls(child);
             }
         }
     }
+
 }

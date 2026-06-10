@@ -26,12 +26,19 @@ public class SkeletonAnimator {
     private float attackSwing = 1.6f;
     private float attackTwist = 0.25f;
 
+    private boolean enabled = true;
     private boolean sidestepLeft = true;
     private float sidestepSpeed = 6.0f;
     private float walkSign = 1f;
     private final Vector3f restRootPos;
     private final Vector3f cachedHipRight = new Vector3f(1f, 0f, 0f);
     private boolean sidestepCached = false;
+
+    // Foot-trajectory IK fields
+    private final Vector3f baseRelL = new Vector3f();
+    private final Vector3f baseRelR = new Vector3f();
+    private float thighLength = 0.30f;
+    private float shinLength = 0.28f;
 
 
     private static final Vector3f AXIS_X = new Vector3f(1f, 0f, 0f);
@@ -42,6 +49,8 @@ public class SkeletonAnimator {
         this.basePose = new BasePose(rig.getArmature());
         this.restRootPos = rig.getRoot().getLocalTranslation().clone();
     }
+
+    public void setEnabled(boolean e) { this.enabled = e; }
 
     public void playIdle() {
         if (currentAnim != AnimationType.IDLE) {
@@ -93,14 +102,20 @@ public class SkeletonAnimator {
                 boolean leftIsBehind = sin < 0f;
                 return isLeftFoot ? leftIsBehind : !leftIsBehind;
             }
-            case SIDESTEP:
-                return isLeftFoot ? !sidestepLeft : sidestepLeft;
+            case SIDESTEP: {
+                float phase = (FastMath.sin(timer * sidestepSpeed) + 1f) * 0.5f;
+                boolean leadFootPlanted = phase > 0.95f;
+                boolean leftIsLead = sidestepLeft;
+                return isLeftFoot ? (leftIsLead && leadFootPlanted) : (!leftIsLead && leadFootPlanted);
+            }
             default:
                 return true;
         }
     }
 
     public void update(float tpf) {
+        if (!enabled) return;
+
         timer += tpf;
 
         basePose.apply(rig);
@@ -214,60 +229,108 @@ public class SkeletonAnimator {
         if (!sidestepCached) {
             rig.getArmature().update();
             cachedHipRight.set(rig.getHips().getModelTransform().getRotation().mult(Vector3f.UNIT_X));
+
+            // Extract base foot positions relative to hip
+            Vector3f hipPos = rig.getHips().getModelTransform().getTranslation(new Vector3f());
+            Vector3f footLPos = rig.getFootL().getModelTransform().getTranslation(new Vector3f());
+            Vector3f footRPos = rig.getFootR().getModelTransform().getTranslation(new Vector3f());
+            baseRelL.set(footLPos).subtractLocal(hipPos);
+            baseRelR.set(footRPos).subtractLocal(hipPos);
+
+            // Extract bone lengths for IK
+            thighLength = rig.getLegL().getLocalTranslation().length();
+            shinLength = rig.getShinL().getLocalTranslation().length();
+
             sidestepCached = true;
         }
 
-        float phase = (FastMath.sin(timer * sidestepSpeed) + 1f) * 0.5f;
+        float cycle = timer * sidestepSpeed;
+        float rootDir = sidestepLeft ? -1f : 1f;
+        boolean leftPush = !sidestepLeft;
 
-        // Asymmetric push curve: leg is active ~0.2–0.8, stance otherwise
-        float t0 = (phase - 0.2f) / 0.6f;
-        t0 = Math.max(0f, Math.min(1f, t0));
-        float pushStrength = t0 * t0 * (3f - 2f * t0);
+        float sinC = FastMath.sin(cycle);
+        float push = Math.max(0, sinC);
+        float pull = Math.max(0, -sinC);
 
-        // Role assignment: which leg is the active driver
-        boolean leftPush = sidestepLeft;
+        // Wrap cycle to [0, 2π) for lateral progress calculations
+        float wrappedCycle = cycle % (2f * (float) Math.PI);
+        if (wrappedCycle < 0) wrappedCycle += 2f * (float) Math.PI;
 
-        // pushLeg = 0→1 for the push-leg active phase
-        float pushLeg   = leftPush ? 1f - pushStrength : pushStrength;
-        float stanceLeg = 1f - pushLeg;
-
-        // ── ROOT: driven by push leg ──
-        float rootAmp = 0.10f;
-        float rootDir = leftPush ? -1f : 1f;
+        // ── 1. PELVIS POSITION ──────────────────────────────
+        // Body height constant — no vertical lift
+        // Body drifts sideways with each step — no oscillating sway
+        float stepWidth = 0.12f;
+        float maxDrift = 0.5f;
+        float drift = FastMath.clamp((cycle / (2f * (float) Math.PI)) * stepWidth, 0, maxDrift) * rootDir;
         Vector3f rootPos = rig.getRoot().getLocalTranslation();
-        rootPos.x = restRootPos.x + pushLeg * rootAmp * rootDir;
+        rootPos.x = restRootPos.x + drift;
+        rootPos.y = restRootPos.y;
         rig.getRoot().setLocalTranslation(rootPos);
 
-        // ── HIP: lean toward push leg ──
-        float hipTilt = pushLeg * 0.12f * rootDir;
-        rig.getHips().setLocalRotation(
-            basePose.getRotation("Hips").mult(
-                new Quaternion().fromAngleAxis(hipTilt, AXIS_X)));
+        // ── 2. FOOT WORLD POSITIONS (stable planted feet) ───
+        // Planted foot = fixed world X position (no sliding)
+        // Stepping foot = animated world X position
+        Vector3f baseRelLead = leftPush ? baseRelR : baseRelL;
+        Vector3f baseRelTrail = leftPush ? baseRelL : baseRelR;
 
-        // ── THIGHS: independent role drive ──
-        float baseThigh = 0.03f;
-        float pushDrive = 0.22f;
-        float stanceLock = 0.05f;
-        float thighL = baseThigh + (leftPush ? pushLeg * pushDrive : stanceLeg * stanceLock);
-        float thighR = baseThigh + (leftPush ? stanceLeg * stanceLock : pushLeg * pushDrive);
+        // Planted foot world positions (constant)
+        float trailPlantedX = restRootPos.x + baseRelTrail.x;
+        float leadPlantedX = restRootPos.x + baseRelLead.x - stepWidth;
 
-        // ── SHINS: stance leg bends, push leg straight ──
-        float shinBend = 0.05f;
-        float shinL = leftPush ? (1f - pushLeg) * shinBend : stanceLeg * shinBend;
-        float shinR = leftPush ? stanceLeg * shinBend : (1f - pushLeg) * shinBend;
+        // Lateral progress for stepping foot
+        float leadLateral = FastMath.clamp(wrappedCycle / (float) Math.PI, 0, 1);
+        float trailLateral = FastMath.clamp((wrappedCycle - (float) Math.PI) / (float) Math.PI, 0, 1);
 
-        // ── FEET: stance planted, push follows ──
-        float footFollow = 0.02f;
-        float footL = leftPush ? pushLeg * footFollow : 0f;
-        float footR = leftPush ? 0f : pushLeg * footFollow;
+        // Foot world X positions
+        float footLeftWorldX, footRightWorldX;
+        if (leftPush) {
+            // Left = trail/planted during push, stepping during pull
+            // Right = lead/stepping during push, planted during pull
+            footLeftWorldX = push * trailPlantedX + pull * (trailPlantedX - 0.10f * trailLateral);
+            footRightWorldX = push * (leadPlantedX + stepWidth - stepWidth * leadLateral)
+                            + pull * leadPlantedX;
+        } else {
+            // Right = trail/planted during push, stepping during pull
+            // Left = lead/stepping during push, planted during pull
+            footLeftWorldX = push * (leadPlantedX + stepWidth - stepWidth * leadLateral)
+                           + pull * leadPlantedX;
+            footRightWorldX = push * trailPlantedX + pull * (trailPlantedX - 0.10f * trailLateral);
+        }
 
-        // ── Apply ──
+        // Foot relative positions (for IK solve)
+        float footLeftX = footLeftWorldX - rootPos.x;
+        float footRightX = footRightWorldX - rootPos.x;
+        float footLeftY = baseRelTrail.y;  // ground level (constant)
+        float footRightY = baseRelLead.y;  // ground level (constant)
+
+        // ── 3. IK SOLVE — THIGH ANGLES ─────────────────────
+        float thighL = FastMath.atan2(footLeftX, -footLeftY);
+        float thighR = FastMath.atan2(-footRightX, -footRightY);
+
         rig.getLegL().setLocalRotation(
             basePose.getRotation("Leg.L").mult(
                 new Quaternion().fromAngleAxis(thighL, cachedHipRight)));
         rig.getLegR().setLocalRotation(
             basePose.getRotation("Leg.R").mult(
                 new Quaternion().fromAngleAxis(thighR, cachedHipRight)));
+
+        // ── 4. SHIN ANGLES (visible bend at max separation) ─
+        // Stepping leg: bends MORE as it steps outward (peaks at max separation)
+        // Support leg: straightens during push extension
+        float shinL, shinR;
+        if (leftPush) {
+            // Left = trail/support, Right = lead/stepping
+            shinL = push * (1f - leadLateral) * kneeBendStrength * 0.5f
+                  + pull * trailLateral * kneeBendStrength * 1.0f;
+            shinR = push * leadLateral * kneeBendStrength * 1.5f
+                  + pull * 0.3f * kneeBendStrength;
+        } else {
+            // Right = trail/support, Left = lead/stepping
+            shinL = push * leadLateral * kneeBendStrength * 1.5f
+                  + pull * 0.3f * kneeBendStrength;
+            shinR = push * (1f - leadLateral) * kneeBendStrength * 0.5f
+                  + pull * trailLateral * kneeBendStrength * 1.0f;
+        }
 
         rig.getShinL().setLocalRotation(
             basePose.getRotation("Shin.L").mult(
@@ -276,12 +339,31 @@ public class SkeletonAnimator {
             basePose.getRotation("Shin.R").mult(
                 new Quaternion().fromAngleAxis(shinR, AXIS_Z)));
 
+        // ── 5. HIP TILT ─────────────────────────────────────
+        float hipTilt = (push - pull) * 0.2f * (leftPush ? -1f : 1f);
+        rig.getHips().setLocalRotation(
+            basePose.getRotation("Hips").mult(
+                new Quaternion().fromAngleAxis(hipTilt, AXIS_X)));
+
+        // ── 6. FEET TILT ────────────────────────────────────
+        float footL = (leftPush ? -1f : 1f) * push * 0.05f + (leftPush ? 1f : -1f) * pull * 0.04f;
+        float footR = (leftPush ? 1f : -1f) * push * 0.05f + (leftPush ? -1f : 1f) * pull * 0.04f;
+
         rig.getFootL().setLocalRotation(
             basePose.getRotation("Foot.L").mult(
                 new Quaternion().fromAngleAxis(footL, AXIS_Z)));
         rig.getFootR().setLocalRotation(
             basePose.getRotation("Foot.R").mult(
                 new Quaternion().fromAngleAxis(footR, AXIS_Z)));
+
+        // ── 7. ARMS ─────────────────────────────────────────
+        float armSwing = FastMath.sin(cycle) * 0.14f;
+        rig.getUpperArmL().setLocalRotation(
+            basePose.getRotation("Upper_Arm.L").mult(
+                new Quaternion().fromAngleAxis(armSwing, AXIS_Z)));
+        rig.getUpperArmR().setLocalRotation(
+            basePose.getRotation("Upper_Arm.R").mult(
+                new Quaternion().fromAngleAxis(-armSwing, AXIS_Z)));
     }
 
 }
