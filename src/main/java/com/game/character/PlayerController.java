@@ -26,9 +26,9 @@ public class PlayerController {
     private boolean firstUpdate = true;
     private boolean moveForward;
     private boolean moveBackward;
-    private boolean moveRight;
     private boolean attackPressed;
     private boolean sidestepActive;
+    private boolean sidestepRightActive;
 
     private SideStepPoseApplier poseApplier;
 
@@ -65,14 +65,14 @@ public class PlayerController {
     }
 
     public void registerInput(InputManager inputManager) {
-        inputManager.addMapping("WalkForward",  new KeyTrigger(KeyInput.KEY_W));
-        inputManager.addMapping("WalkBackward", new KeyTrigger(KeyInput.KEY_S));
-        inputManager.addMapping("SidestepPose", new KeyTrigger(KeyInput.KEY_A));
-        inputManager.addMapping("WalkRight",    new KeyTrigger(KeyInput.KEY_D));
-        inputManager.addMapping("Attack",       new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
+        inputManager.addMapping("WalkForward",    new KeyTrigger(KeyInput.KEY_W));
+        inputManager.addMapping("WalkBackward",   new KeyTrigger(KeyInput.KEY_S));
+        inputManager.addMapping("SidestepPose",   new KeyTrigger(KeyInput.KEY_A));
+        inputManager.addMapping("SidestepPoseRight", new KeyTrigger(KeyInput.KEY_D));
+        inputManager.addMapping("Attack",         new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
 
         inputManager.addListener(actionListener,
-                "WalkForward", "WalkBackward", "SidestepPose", "WalkRight", "Attack");
+                "WalkForward", "WalkBackward", "SidestepPose", "SidestepPoseRight", "Attack");
     }
 
     public void setupPhysics(BulletAppState bulletAppState) {
@@ -130,10 +130,10 @@ public class PlayerController {
             this.modelHeight = modelH;
         }
 
-        if (poseApplier != null && sidestepActive) {
+        if (poseApplier != null && (sidestepActive || sidestepRightActive)) {
             physicsControl.setWalkDirection(Vector3f.ZERO);
             if (!poseApplier.isActive()) {
-                poseApplier.startSequence();
+                poseApplier.startSequence(sidestepRightActive);
             }
             poseApplier.update(tpf);
             return;
@@ -159,7 +159,7 @@ public class PlayerController {
             physicsControl.setWalkDirection(Vector3f.ZERO);
         }
 
-        boolean strafing = moveRight && !(moveForward || moveBackward);
+        boolean strafing = false;
 
         CharacterState current = stateMachine.getCurrentState();
 
@@ -240,7 +240,6 @@ public class PlayerController {
         Vector3f dir = new Vector3f();
         if (moveForward)  dir.addLocal(DIR_CACHE[0]);
         if (moveBackward) dir.addLocal(DIR_CACHE[1]);
-        if (moveRight)    dir.addLocal(DIR_CACHE[3]);
         return dir;
     }
 
@@ -254,7 +253,12 @@ public class PlayerController {
                     poseApplier.stopSequence();
                 }
             }
-            case "WalkRight"    -> moveRight    = keyPressed;
+            case "SidestepPoseRight" -> {
+                sidestepRightActive = keyPressed;
+                if (!keyPressed && poseApplier != null) {
+                    poseApplier.stopSequence();
+                }
+            }
             case "Attack"       -> attackPressed = keyPressed;
         }
     };

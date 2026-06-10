@@ -44,6 +44,7 @@ public class SideStepPoseApplier {
     private boolean restPoseCaptured = false;
 
     private boolean active = false;
+    private boolean mirrored = false;
     private int stepIdx = 0;
     private float stepT = 0f;
     private final Map<String, Quaternion> deltaFrom = new HashMap<>();
@@ -93,9 +94,10 @@ public class SideStepPoseApplier {
             + "\" with " + boneDeltas.size() + " deltas");
     }
 
-    public void startSequence() {
+    public void startSequence(boolean right) {
         if (!restPoseCaptured) return;
 
+        mirrored = right;
         deltaFrom.clear();
         for (String bone : WHITELIST) {
             Joint j = rig.get(bone);
@@ -144,7 +146,8 @@ public class SideStepPoseApplier {
 
             Quaternion to = IDENTITY;
             if (targetPose != null) {
-                Quaternion tgt = targetPose.get(bone);
+                String targetBone = mirrored && !bone.equals("Hips") ? mirrorBone(bone) : bone;
+                Quaternion tgt = targetPose.get(targetBone);
                 if (tgt != null) to = tgt;
             }
 
@@ -154,7 +157,8 @@ public class SideStepPoseApplier {
         if (t >= 1f) {
             if (targetPose != null) {
                 for (String bone : WHITELIST) {
-                    Quaternion tgt = targetPose.get(bone);
+                    String targetBone = mirrored && !bone.equals("Hips") ? mirrorBone(bone) : bone;
+                    Quaternion tgt = targetPose.get(targetBone);
                     deltaFrom.put(bone, tgt != null ? tgt : IDENTITY);
                 }
             } else {
@@ -203,5 +207,11 @@ public class SideStepPoseApplier {
 
     private static Quaternion blenderToJme(Quaternion q) {
         return new Quaternion(q.getX(), q.getZ(), -q.getY(), q.getW());
+    }
+
+    private static String mirrorBone(String bone) {
+        if (bone.endsWith(".L")) return bone.replace(".L", ".R");
+        if (bone.endsWith(".R")) return bone.replace(".R", ".L");
+        return bone;
     }
 }
