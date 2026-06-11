@@ -1,7 +1,6 @@
 package com.game.character;
 
 import com.jme3.math.Quaternion;
-import com.jme3.math.Vector3f;
 import com.jme3.scene.Spatial;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,7 +27,6 @@ public class SkeletonAnimator {
 
     private final Quaternion tmpQuat = new Quaternion();
     private final Quaternion tmpResult = new Quaternion();
-    private final Vector3f tmpVec = new Vector3f();
 
     private Map<String, Quaternion> realBindPose;
     private boolean bindPoseCaptured;
@@ -105,7 +103,7 @@ public class SkeletonAnimator {
         if (playing && currentClip != null) {
             updateAnimation(tpf);
         } else {
-            basePose.apply(rig);
+            // basePose.apply(rig);  // TEST: see if idle visual comes from real armature GLB default
         }
     }
 
@@ -144,20 +142,11 @@ public class SkeletonAnimator {
         applyInterpolated(keyA, blend);
     }
 
-    private static final float APOSE = 1.414f;
-
     private void captureRealBindPose() {
         realBindPose = new LinkedHashMap<>();
         com.jme3.anim.Armature arm = getRealArmature();
         for (com.jme3.anim.Joint j : arm.getJointList()) {
-            Quaternion rot = j.getLocalRotation().clone();
-            String name = j.getName();
-            if (name.equals("CC_Base_L_Upperarm")) {
-                rot.multLocal(new Quaternion().fromAngleAxis(APOSE, Vector3f.UNIT_Z));
-            } else if (name.equals("CC_Base_R_Upperarm")) {
-                rot.multLocal(new Quaternion().fromAngleAxis(-APOSE, Vector3f.UNIT_Z));
-            }
-            realBindPose.put(name, rot);
+            realBindPose.put(j.getName(), j.getLocalRotation().clone());
         }
         bindPoseCaptured = true;
     }
@@ -188,7 +177,15 @@ public class SkeletonAnimator {
             if (bindRot == null) continue;
 
             tmpQuat.slerp(kfA.rotations[i], kfB.rotations[i], t);
-            tmpResult.set(bindRot).multLocal(tmpQuat);
+            
+            String name = boneNames[i];
+            if (name.equals("CC_Base_L_Upperarm") || name.equals("CC_Base_R_Upperarm")) {
+                // Undo blenderToJme axis swap for upper arm — raw Blender delta
+                tmpResult.set(bindRot).multLocal(
+                    new Quaternion(tmpQuat.getX(), -tmpQuat.getZ(), tmpQuat.getY(), tmpQuat.getW()));
+            } else {
+                tmpResult.set(bindRot).multLocal(tmpQuat);
+            }
             j.setLocalRotation(tmpResult);
         }
     }
@@ -210,7 +207,13 @@ public class SkeletonAnimator {
             Quaternion bindRot = realBindPose.get(boneNames[i]);
             if (bindRot == null) continue;
 
-            tmpResult.set(bindRot).multLocal(kf.rotations[i]);
+            String name = boneNames[i];
+            if (name.equals("CC_Base_L_Upperarm") || name.equals("CC_Base_R_Upperarm")) {
+                tmpResult.set(bindRot).multLocal(
+                    new Quaternion(kf.rotations[i].getX(), -kf.rotations[i].getZ(), kf.rotations[i].getY(), kf.rotations[i].getW()));
+            } else {
+                tmpResult.set(bindRot).multLocal(kf.rotations[i]);
+            }
             j.setLocalRotation(tmpResult);
         }
     }

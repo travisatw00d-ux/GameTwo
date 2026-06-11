@@ -37,8 +37,8 @@ public class PlayerController {
     private float sidestepSpeedMult = 0.22f;
     private static final Vector3f[] DIR_CACHE = new Vector3f[4];
     static {
-        DIR_CACHE[0] = new Vector3f(0f, 0f, -1f);
-        DIR_CACHE[1] = new Vector3f(0f, 0f, 1f);
+        DIR_CACHE[0] = new Vector3f(0f, 0f, 1f);
+        DIR_CACHE[1] = new Vector3f(0f, 0f, -1f);
         DIR_CACHE[2] = new Vector3f(-1f, 0f, 0f);
         DIR_CACHE[3] = new Vector3f(1f, 0f, 0f);
     }
@@ -155,6 +155,8 @@ public class PlayerController {
                 default       -> 1f;
             };
             physicsControl.setWalkDirection(direction.mult(moveSpeed * speedMult));
+            // Face the movement direction so pressing S shows the front
+            physicsControl.setViewDirection(direction);
         } else {
             physicsControl.setWalkDirection(Vector3f.ZERO);
         }
@@ -219,7 +221,7 @@ public class PlayerController {
             case DEAD -> {}
         }
 
-        animator.setWalkSign(!moveForward || moveBackward);
+        animator.setWalkSign(moveForward);
         animator.update(tpf);
         footIK.setLeftLockHint(animator.shouldLockFoot(true));
         footIK.setRightLockHint(animator.shouldLockFoot(false));

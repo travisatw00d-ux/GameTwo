@@ -176,7 +176,7 @@ public class AnimationClip {
             float lz = Float.parseFloat(locParts[2].trim());
 
             names.add(boneName);
-            rots.add(new Quaternion(x, y, z, w));
+            rots.add(blenderToJme(new Quaternion(x, y, z, w)));
             locs.add(new Vector3f(lx, ly, lz));
             count++;
         }
@@ -186,5 +186,9 @@ public class AnimationClip {
         java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"" + key + "\"\\s*:\\s*(-?\\d+)");
         java.util.regex.Matcher m = p.matcher(obj);
         return m.find() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    private static Quaternion blenderToJme(Quaternion q) {
+        return new Quaternion(q.getX(), q.getZ(), -q.getY(), q.getW());
     }
 }
