@@ -1,5 +1,6 @@
 package com.game;
 
+import com.game.character.AnimationManager;
 import com.game.character.CharacterFactory;
 import com.game.character.PlayerController;
 import com.game.character.ProceduralHumanoid;
@@ -29,6 +30,7 @@ public class Main extends SimpleApplication {
     private PlayerController playerController;
     private ProceduralHumanoid playerHumanoid;
     private SkeletonAnimator playerAnim;
+    private AnimationManager animManager;
     private TrainingDummy dummy;
     private GraphicsSettings gfx;
     private SideStepPoseApplier poseApplier;
@@ -62,7 +64,7 @@ public class Main extends SimpleApplication {
         assetManager.registerLocator("Assets", FileLocator.class);
 
         // Debug: load model and print info
-        var model = assetManager.loadModel("Models/MainChar.glb");
+        var model = assetManager.loadModel("Models/MainCharRigged.glb");
         ProceduralHumanoid.printDebugInfo(model);
 
         // Physics
@@ -89,8 +91,10 @@ public class Main extends SimpleApplication {
 
         // Player
         playerHumanoid = CharacterFactory.createHumanoid(assetManager);
-        playerHumanoid.attachHair(assetManager, "Models/Hair1.glb");
-        playerAnim = new SkeletonAnimator(playerHumanoid.getRig());
+
+        animManager = new AnimationManager();
+        playerAnim = new SkeletonAnimator(playerHumanoid.getRig(), animManager);
+        playerAnim.setModelRoot(playerHumanoid.getCharacter());
         playerController = new PlayerController(playerHumanoid, playerAnim);
         rootNode.attachChild(playerController.getPhysicsNode());
         playerHumanoid.enableShadows();
@@ -133,7 +137,7 @@ public class Main extends SimpleApplication {
         flyCam.setEnabled(false);
         Vector3f start = playerHumanoid.getCharacter().getWorldTranslation();
         float camLookY = 0.5f;
-        cam.setLocation(start.add(0f, camLookY + 2f, 6f));
+        cam.setLocation(start.add(0f, camLookY + 2f, -6f));
         cam.lookAt(start.add(0f, camLookY, 0f), Vector3f.UNIT_Y);
     }
 
@@ -144,7 +148,7 @@ public class Main extends SimpleApplication {
 
         Vector3f pos = playerHumanoid.getCharacter().getWorldTranslation();
         float camLookY = playerController.getModelHeight() * 0.6f;
-        cam.setLocation(pos.add(0f, camLookY + 2f, 6f));
+        cam.setLocation(pos.add(0f, camLookY + 2f, -6f));
         cam.lookAt(pos.add(0f, camLookY, 0f), Vector3f.UNIT_Y);
 
     }
