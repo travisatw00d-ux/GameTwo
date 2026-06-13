@@ -29,12 +29,14 @@ public class PlayerController {
     private boolean attackPressed;
     private boolean sidestepActive;
     private boolean sidestepRightActive;
-
-    private SideStepPoseApplier poseApplier;
+    private boolean lastSidestepLeft = true;
+    private boolean lastSidestepFront;
+    private boolean lastSidestepBack;
+    private boolean lastWalkForward = true;
 
     private float moveSpeed = 5f;
     private float walkSpeedMult = 0.55f;
-    private float sidestepSpeedMult = 0.22f;
+    private float sidestepSpeedMult = 0.4f;
     private static final Vector3f[] DIR_CACHE = new Vector3f[4];
     static {
         DIR_CACHE[0] = new Vector3f(0f, 0f, 1f);
@@ -57,8 +59,6 @@ public class PlayerController {
 
         this.footIK = new FootIKController(humanoid.getRig(), characterNode);
     }
-
-    public void setPoseApplier(SideStepPoseApplier a) { this.poseApplier = a; }
 
     public CharacterStateMachine getStateMachine() {
         return stateMachine;
@@ -130,19 +130,12 @@ public class PlayerController {
             this.modelHeight = modelH;
         }
 
-        if (poseApplier != null && (sidestepActive || sidestepRightActive)) {
-            physicsControl.setWalkDirection(Vector3f.ZERO);
-            if (!poseApplier.isActive()) {
-                poseApplier.startSequence();
-            }
-            poseApplier.update(tpf);
-            return;
-        }
-
         if (stateMachine.getCurrentState() == CharacterState.DEAD) {
             physicsControl.setWalkDirection(Vector3f.ZERO);
             return;
         }
+
+        boolean strafing = sidestepActive || sidestepRightActive;
 
         Vector3f direction = computeDirection();
         boolean moving = direction.length() > 0.01f;
@@ -155,13 +148,12 @@ public class PlayerController {
                 default       -> 1f;
             };
             physicsControl.setWalkDirection(direction.mult(moveSpeed * speedMult));
-            // Face the movement direction so pressing S shows the front
-            physicsControl.setViewDirection(direction);
+            if (!strafing && !moveBackward) {
+                physicsControl.setViewDirection(direction);
+            }
         } else {
             physicsControl.setWalkDirection(Vector3f.ZERO);
         }
-
-        boolean strafing = false;
 
         CharacterState current = stateMachine.getCurrentState();
 
@@ -170,11 +162,31 @@ public class PlayerController {
                 if (attackPressed) {
                     animator.playAttack();
                     stateMachine.changeState(CharacterState.ATTACK);
-                } else if (strafing) {
-                    animator.playSidestep(false);
+                } else if (strafing && moveForward) {
+                    animator.playFrontSidestep(sidestepActive);
+                    lastSidestepLeft = sidestepActive;
+                    lastSidestepFront = true;
+                    lastSidestepBack = false;
                     stateMachine.changeState(CharacterState.SIDESTEP);
-                } else if (moving) {
+                } else if (strafing && moveBackward) {
+                    animator.playBackSidestep(sidestepActive);
+                    lastSidestepLeft = sidestepActive;
+                    lastSidestepFront = false;
+                    lastSidestepBack = true;
+                    stateMachine.changeState(CharacterState.SIDESTEP);
+                } else if (strafing) {
+                    animator.playSidestep(sidestepActive);
+                    lastSidestepLeft = sidestepActive;
+                    lastSidestepFront = false;
+                    lastSidestepBack = false;
+                    stateMachine.changeState(CharacterState.SIDESTEP);
+                } else if (moving && !moveBackward) {
                     animator.playWalk();
+                    lastWalkForward = true;
+                    stateMachine.changeState(CharacterState.WALK);
+                } else if (moving) {
+                    animator.playWalkBack();
+                    lastWalkForward = false;
                     stateMachine.changeState(CharacterState.WALK);
                 }
             }
@@ -183,11 +195,34 @@ public class PlayerController {
                     animator.playAttack();
                     stateMachine.changeState(CharacterState.ATTACK);
                 } else if (strafing) {
-                    animator.playSidestep(false);
+                    if (moveForward) {
+                        animator.playFrontSidestep(sidestepActive);
+                        lastSidestepFront = true;
+                        lastSidestepBack = false;
+                    } else if (moveBackward) {
+                        animator.playBackSidestep(sidestepActive);
+                        lastSidestepFront = false;
+                        lastSidestepBack = true;
+                    } else {
+                        animator.playSidestep(sidestepActive);
+                        lastSidestepFront = false;
+                        lastSidestepBack = false;
+                    }
+                    lastSidestepLeft = sidestepActive;
                     stateMachine.changeState(CharacterState.SIDESTEP);
                 } else if (!moving) {
                     animator.playIdle();
                     stateMachine.changeState(CharacterState.IDLE);
+                } else {
+                    boolean wantForward = moveForward && !moveBackward;
+                    if (wantForward != lastWalkForward) {
+                        if (wantForward) {
+                            animator.playWalk();
+                        } else {
+                            animator.playWalkBack();
+                        }
+                        lastWalkForward = wantForward;
+                    }
                 }
             }
             case SIDESTEP -> {
@@ -196,21 +231,62 @@ public class PlayerController {
                     stateMachine.changeState(CharacterState.ATTACK);
                 } else if (!strafing) {
                     if (moving) {
-                        animator.playWalk();
+                        if (moveBackward && !moveForward) {
+                            animator.playWalkBack();
+                            lastWalkForward = false;
+                        } else {
+                            animator.playWalk();
+                            lastWalkForward = true;
+                        }
                         stateMachine.changeState(CharacterState.WALK);
                     } else {
                         animator.playIdle();
                         stateMachine.changeState(CharacterState.IDLE);
+                    }
+                } else {
+                    boolean wantFront = moveForward;
+                    boolean wantBack = moveBackward;
+                    boolean wantLeft = sidestepActive;
+                    if (wantFront != lastSidestepFront || wantBack != lastSidestepBack || wantLeft != lastSidestepLeft) {
+                        if (wantFront) {
+                            animator.playFrontSidestep(wantLeft);
+                        } else if (wantBack) {
+                            animator.playBackSidestep(wantLeft);
+                        } else {
+                            animator.playSidestep(wantLeft);
+                        }
+                        lastSidestepLeft = wantLeft;
+                        lastSidestepFront = wantFront;
+                        lastSidestepBack = wantBack;
                     }
                 }
             }
             case ATTACK -> {
                 if (animator.getCurrentAnimation() == SkeletonAnimator.AnimationType.IDLE) {
                     if (strafing) {
-                        animator.playSidestep(false);
+                        if (moveForward) {
+                            animator.playFrontSidestep(sidestepActive);
+                            lastSidestepFront = true;
+                            lastSidestepBack = false;
+                        } else if (moveBackward) {
+                            animator.playBackSidestep(sidestepActive);
+                            lastSidestepFront = false;
+                            lastSidestepBack = true;
+                        } else {
+                            animator.playSidestep(sidestepActive);
+                            lastSidestepFront = false;
+                            lastSidestepBack = false;
+                        }
+                        lastSidestepLeft = sidestepActive;
                         stateMachine.changeState(CharacterState.SIDESTEP);
                     } else if (moving) {
-                        animator.playWalk();
+                        if (moveBackward && !moveForward) {
+                            animator.playWalkBack();
+                            lastWalkForward = false;
+                        } else {
+                            animator.playWalk();
+                            lastWalkForward = true;
+                        }
                         stateMachine.changeState(CharacterState.WALK);
                     } else {
                         animator.playIdle();
@@ -240,8 +316,10 @@ public class PlayerController {
 
     private Vector3f computeDirection() {
         Vector3f dir = new Vector3f();
-        if (moveForward)  dir.addLocal(DIR_CACHE[0]);
-        if (moveBackward) dir.addLocal(DIR_CACHE[1]);
+        if (moveForward)        dir.addLocal(DIR_CACHE[0]);
+        if (moveBackward)       dir.addLocal(DIR_CACHE[1]);
+        if (sidestepActive)     dir.addLocal(DIR_CACHE[3]);
+        if (sidestepRightActive) dir.addLocal(DIR_CACHE[2]);
         return dir;
     }
 
@@ -249,18 +327,8 @@ public class PlayerController {
         switch (name) {
             case "WalkForward"  -> moveForward  = keyPressed;
             case "WalkBackward" -> moveBackward = keyPressed;
-            case "SidestepPose" -> {
-                sidestepActive = keyPressed;
-                if (!keyPressed && poseApplier != null) {
-                    poseApplier.stopSequence();
-                }
-            }
-            case "SidestepPoseRight" -> {
-                sidestepRightActive = keyPressed;
-                if (!keyPressed && poseApplier != null) {
-                    poseApplier.stopSequence();
-                }
-            }
+            case "SidestepPose" -> sidestepActive = keyPressed;
+            case "SidestepPoseRight" -> sidestepRightActive = keyPressed;
             case "Attack"       -> attackPressed = keyPressed;
         }
     };

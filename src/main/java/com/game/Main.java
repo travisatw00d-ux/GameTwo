@@ -4,7 +4,6 @@ import com.game.character.AnimationManager;
 import com.game.character.CharacterFactory;
 import com.game.character.PlayerController;
 import com.game.character.ProceduralHumanoid;
-import com.game.character.SideStepPoseApplier;
 import com.game.character.SkeletonAnimator;
 import com.game.world.SceneSetup;
 import com.game.world.TrainingDummy;
@@ -21,8 +20,6 @@ import com.jme3.scene.Node;
 import com.jme3.scene.Spatial;
 import com.jme3.scene.shape.Box;
 import com.jme3.system.AppSettings;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 public class Main extends SimpleApplication {
 
@@ -33,8 +30,6 @@ public class Main extends SimpleApplication {
     private AnimationManager animManager;
     private TrainingDummy dummy;
     private GraphicsSettings gfx;
-    private SideStepPoseApplier poseApplier;
-
     public static void main(String[] args) {
         Main app = new Main();
 
@@ -95,6 +90,7 @@ public class Main extends SimpleApplication {
         animManager = new AnimationManager();
         playerAnim = new SkeletonAnimator(playerHumanoid.getRig(), animManager);
         playerAnim.setModelRoot(playerHumanoid.getCharacter());
+
         playerController = new PlayerController(playerHumanoid, playerAnim);
         rootNode.attachChild(playerController.getPhysicsNode());
         playerHumanoid.enableShadows();
@@ -102,22 +98,6 @@ public class Main extends SimpleApplication {
 
         playerController.registerInput(inputManager);
         playerController.setupPhysics(bulletAppState);
-
-        // ── SIDESTEP POSE SEQUENCE ──
-        try {
-            poseApplier = new SideStepPoseApplier(playerHumanoid.getRig());
-            poseApplier.addPose("lift",  new String(Files.readAllBytes(Paths.get("Assets/Models/SideStepLift.json"))));
-            poseApplier.addPose("lift2", new String(Files.readAllBytes(Paths.get("Assets/Models/SideStepLift2.json"))));
-            poseApplier.addPose("lift3", new String(Files.readAllBytes(Paths.get("Assets/Models/SideStepLift3.json"))));
-            poseApplier.addPose("plant", new String(Files.readAllBytes(Paths.get("Assets/Models/SideStePlant.json"))));
-            playerController.setPoseApplier(poseApplier);
-
-            playerAnim.setEnabled(false);
-            poseApplier.captureRestPose();
-            playerAnim.setEnabled(true);
-        } catch (Exception e) {
-            System.err.println("FAIL: Could not load pose JSON files - " + e.getMessage());
-        }
 
         // Training dummy
         dummy = new TrainingDummy(assetManager);

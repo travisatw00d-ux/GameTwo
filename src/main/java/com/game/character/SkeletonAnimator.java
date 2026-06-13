@@ -8,7 +8,7 @@ import java.util.Map;
 public class SkeletonAnimator {
 
     public enum AnimationType {
-        IDLE, WALK, ATTACK, SIDESTEP
+        IDLE, WALK, WALKBACK, ATTACK, SIDESTEP
     }
 
     private final HumanoidRig rig;
@@ -29,6 +29,11 @@ public class SkeletonAnimator {
 
     private Map<String, Quaternion> realBindPose;
     private boolean bindPoseCaptured;
+
+    private Map<String, Quaternion> crossfadeFrom;
+    private float crossfadeTimer;
+    private float crossfadeDuration = 8f / 30f;
+    private boolean crossfading;
 
     public SkeletonAnimator(HumanoidRig rig) {
         this(rig, null);
@@ -58,6 +63,13 @@ public class SkeletonAnimator {
         }
     }
 
+    public void playWalkBack() {
+        if (currentAnim != AnimationType.WALKBACK) {
+            currentAnim = AnimationType.WALKBACK;
+            play("WalkingBackwards");
+        }
+    }
+
     public void playAttack() {
         currentAnim = AnimationType.ATTACK;
         play("Attack");
@@ -68,12 +80,28 @@ public class SkeletonAnimator {
         play(left ? "LeftSideStep" : "RightSideStep");
     }
 
+    public void playFrontSidestep(boolean left) {
+        currentAnim = AnimationType.SIDESTEP;
+        play(left ? "LeftFrontSideStep" : "RightFrontSideStep");
+    }
+
+    public void playBackSidestep(boolean left) {
+        currentAnim = AnimationType.SIDESTEP;
+        play(left ? "LeftBackSideStep" : "RightBackSideStep");
+    }
+
     private void play(String name) {
         if (animManager == null) {
             System.err.println("SkeletonAnimator: animManager is null, can't play \"" + name + "\"");
             return;
         }
-        currentClip = animManager.getAnimation(name);
+        AnimationClip newClip = animManager.getAnimation(name);
+
+        if (playing && currentClip != null && newClip != null && newClip != currentClip) {
+            startCrossfade();
+        }
+
+        currentClip = newClip;
         playbackTime = 0f;
         playing = currentClip != null;
         if (!playing) {
@@ -94,14 +122,46 @@ public class SkeletonAnimator {
         return true;
     }
 
+    private void startCrossfade() {
+        com.jme3.anim.Armature arm = getRealArmature();
+        crossfadeFrom = new LinkedHashMap<>();
+        for (com.jme3.anim.Joint j : arm.getJointList()) {
+            crossfadeFrom.put(j.getName(), j.getLocalRotation().clone());
+        }
+        crossfadeTimer = 0f;
+        crossfading = true;
+    }
+
+    private void updateCrossfade(float tpf) {
+        if (!crossfading) return;
+        crossfadeTimer += tpf;
+        float t = Math.min(crossfadeTimer / crossfadeDuration, 1f);
+
+        com.jme3.anim.Armature arm = getRealArmature();
+        for (com.jme3.anim.Joint j : arm.getJointList()) {
+            Quaternion from = crossfadeFrom.get(j.getName());
+            if (from == null) continue;
+            tmpQuat.slerp(from, j.getLocalRotation(), t);
+            tmpQuat.normalizeLocal();
+            j.setLocalRotation(tmpQuat);
+        }
+
+        if (t >= 1f) {
+            crossfading = false;
+            crossfadeFrom = null;
+        }
+    }
+
     public void update(float tpf) {
         if (!enabled) return;
         timer += tpf;
 
         if (playing && currentClip != null) {
             updateAnimation(tpf);
-        } else {
-            // basePose.apply(rig);  // TEST: see if idle visual comes from real armature GLB default
+        }
+
+        if (crossfading) {
+            updateCrossfade(tpf);
         }
     }
 
