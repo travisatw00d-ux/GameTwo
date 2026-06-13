@@ -22,7 +22,6 @@ public class SkeletonAnimator {
 
     private AnimationClip currentClip;
     private float playbackTime;
-    private int keyA;
     private boolean playing;
 
     private final Quaternion tmpQuat = new Quaternion();
@@ -48,7 +47,7 @@ public class SkeletonAnimator {
     public void playIdle() {
         if (currentAnim != AnimationType.IDLE) {
             currentAnim = AnimationType.IDLE;
-            play("Idle");
+            play("Idle_Breathing");
         }
     }
 
@@ -66,7 +65,7 @@ public class SkeletonAnimator {
 
     public void playSidestep(boolean left) {
         currentAnim = AnimationType.SIDESTEP;
-        play("Sidestep");
+        play(left ? "LeftSideStep" : "RightSideStep");
     }
 
     private void play(String name) {
@@ -76,7 +75,6 @@ public class SkeletonAnimator {
         }
         currentClip = animManager.getAnimation(name);
         playbackTime = 0f;
-        keyA = 0;
         playing = currentClip != null;
         if (!playing) {
             currentAnim = AnimationType.IDLE;
@@ -110,36 +108,30 @@ public class SkeletonAnimator {
     private void updateAnimation(float tpf) {
         playbackTime += tpf;
         AnimationClip.Keyframe[] keyframes = currentClip.getKeyframes();
+        int last = keyframes.length - 1;
+
+        float t = Math.min(playbackTime, currentClip.getDuration());
+
+        int seg = 0;
+        for (int i = 0; i < last; i++) {
+            if (keyframes[i + 1].time > t) { seg = i; break; }
+            seg = i;
+        }
+
+        float segDur = keyframes[seg + 1].time - keyframes[seg].time;
+        float blend = segDur > 0f ? (t - keyframes[seg].time) / segDur : 0f;
+        if (blend < 0f) blend = 0f;
+        if (blend > 1f) blend = 1f;
+
+        applyInterpolated(seg, blend);
 
         if (playbackTime >= currentClip.getDuration()) {
             if (currentClip.isLooping()) {
                 playbackTime %= currentClip.getDuration();
-                keyA = 0;
             } else {
                 playing = false;
-                applyKeyframe(keyframes.length - 1);
-                return;
             }
         }
-
-        float t = playbackTime;
-        int last = keyframes.length - 1;
-
-        while (keyA < last - 1 && keyframes[keyA + 1].time <= t) {
-            keyA++;
-        }
-        while (keyA > 0 && keyframes[keyA].time > t) {
-            keyA--;
-        }
-
-        AnimationClip.Keyframe kfA = keyframes[keyA];
-        AnimationClip.Keyframe kfB = keyframes[keyA + 1];
-        float segDur = kfB.time - kfA.time;
-        float blend = segDur > 0f ? (t - kfA.time) / segDur : 0f;
-        if (blend < 0f) blend = 0f;
-        if (blend > 1f) blend = 1f;
-
-        applyInterpolated(keyA, blend);
     }
 
     private void captureRealBindPose() {
@@ -158,6 +150,10 @@ public class SkeletonAnimator {
             && Math.abs(q.getZ()) < 0.001f;
     }
 
+    private static Quaternion blenderToJme(Quaternion q) {
+        return new Quaternion(q.getX(), q.getZ(), -q.getY(), q.getW());
+    }
+
     private void applyInterpolated(int idx, float t) {
         if (!bindPoseCaptured) {
             captureRealBindPose();
@@ -168,8 +164,27 @@ public class SkeletonAnimator {
         String[] boneNames = currentClip.getBoneNames();
         com.jme3.anim.Armature armReal = getRealArmature();
 
+        Quaternion storedRootLean = new Quaternion();
+        boolean haveRootLean = false;
+
+        // First pass: find root lean
         for (int i = 0; i < boneNames.length; i++) {
-            if (isIdentity(kfA.rotations[i])) continue;
+            if ("RL_BoneRoot".equals(boneNames[i])) {
+                tmpQuat.slerp(kfA.rotations[i], kfB.rotations[i], t);
+                tmpQuat.normalizeLocal();
+                storedRootLean.set(blenderToJme(tmpQuat));
+                haveRootLean = true;
+                break;
+            }
+        }
+
+        // Second pass: apply all bones
+        for (int i = 0; i < boneNames.length; i++) {
+            boolean isHip = "CC_Base_Hip".equals(boneNames[i]);
+            boolean isRoot = "RL_BoneRoot".equals(boneNames[i]);
+
+            if (isRoot) continue;
+            if (!isHip && isIdentity(kfA.rotations[i]) && isIdentity(kfB.rotations[i])) continue;
 
             com.jme3.anim.Joint j = armReal.getJoint(boneNames[i]);
             if (j == null) continue;
@@ -177,42 +192,12 @@ public class SkeletonAnimator {
             if (bindRot == null) continue;
 
             tmpQuat.slerp(kfA.rotations[i], kfB.rotations[i], t);
-            
-            String name = boneNames[i];
-            if (name.equals("CC_Base_L_Upperarm") || name.equals("CC_Base_R_Upperarm")) {
-                // Undo blenderToJme axis swap for upper arm — raw Blender delta
-                tmpResult.set(bindRot).multLocal(
-                    new Quaternion(tmpQuat.getX(), -tmpQuat.getZ(), tmpQuat.getY(), tmpQuat.getW()));
+            tmpQuat.normalizeLocal();
+
+            if (isHip && haveRootLean) {
+                tmpResult.set(bindRot).multLocal(storedRootLean).multLocal(tmpQuat);
             } else {
                 tmpResult.set(bindRot).multLocal(tmpQuat);
-            }
-            j.setLocalRotation(tmpResult);
-        }
-    }
-
-    private void applyKeyframe(int idx) {
-        if (!bindPoseCaptured) {
-            captureRealBindPose();
-        }
-
-        AnimationClip.Keyframe kf = currentClip.getKeyframes()[idx];
-        String[] boneNames = currentClip.getBoneNames();
-        com.jme3.anim.Armature armReal = getRealArmature();
-
-        for (int i = 0; i < boneNames.length; i++) {
-            if (isIdentity(kf.rotations[i])) continue;
-
-            com.jme3.anim.Joint j = armReal.getJoint(boneNames[i]);
-            if (j == null) continue;
-            Quaternion bindRot = realBindPose.get(boneNames[i]);
-            if (bindRot == null) continue;
-
-            String name = boneNames[i];
-            if (name.equals("CC_Base_L_Upperarm") || name.equals("CC_Base_R_Upperarm")) {
-                tmpResult.set(bindRot).multLocal(
-                    new Quaternion(kf.rotations[i].getX(), -kf.rotations[i].getZ(), kf.rotations[i].getY(), kf.rotations[i].getW()));
-            } else {
-                tmpResult.set(bindRot).multLocal(kf.rotations[i]);
             }
             j.setLocalRotation(tmpResult);
         }

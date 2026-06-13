@@ -9,7 +9,7 @@ public class AnimationClip {
 
     private final String name;
     private final float duration;
-    private final boolean looping;
+    private boolean looping;
     private final String[] boneNames;
     private final Keyframe[] keyframes;
 
@@ -24,6 +24,7 @@ public class AnimationClip {
     public String getName()          { return name; }
     public float getDuration()       { return duration; }
     public boolean isLooping()       { return looping; }
+    public void setLooping(boolean l) { this.looping = l; }
     public String[] getBoneNames()   { return boneNames; }
     public Keyframe[] getKeyframes() { return keyframes; }
 
@@ -44,6 +45,16 @@ public class AnimationClip {
     }
 
     public static AnimationClip load(String name, String json, float fps) {
+        String trimmed = json.trim();
+
+        Boolean loopOverride = null;
+        if (trimmed.startsWith("{") && trimmed.contains("\"frames\"")) {
+            Boolean extracted = extractLoopFlag(trimmed);
+            loopOverride = extracted == null ? true : extracted;
+            float envelopeFps = extractFps(trimmed);
+            if (envelopeFps > 0f) fps = envelopeFps;
+        }
+
         List<int[]> frameMeta = new ArrayList<>();
         List<String> frameStrings = new ArrayList<>();
         parseFrames(json, frameStrings, frameMeta);
@@ -55,39 +66,170 @@ public class AnimationClip {
         String[] boneNames = null;
         int firstFrameNum = frameMeta.get(0)[0];
         int lastFrameNum = frameMeta.get(frameStrings.size() - 1)[0];
-        boolean looping = frameStrings.size() > 1 && lastFrameNum == firstFrameNum;
 
-        int frameCount = looping ? frameStrings.size() - 1 : frameStrings.size();
-        Keyframe[] keyframes = new Keyframe[frameCount];
-
-        for (int i = 0; i < frameCount; i++) {
-            int[] meta = frameMeta.get(i);
-            int frameNum = meta[0];
-
-            // Parse bones from this frame string
-            String frameStr = frameStrings.get(i);
-            List<String> boneNamesList = new ArrayList<>();
-            List<Quaternion> rots = new ArrayList<>();
-            List<Vector3f> locs = new ArrayList<>();
-            parseBones(frameStr, boneNamesList, rots, locs);
-
-            if (boneNames == null) {
-                boneNames = boneNamesList.toArray(new String[0]);
-            }
-
-            float frameTime = (frameNum - firstFrameNum) / fps;
-
-            Keyframe kf = new Keyframe(Math.max(0f, frameTime), boneNames.length);
-            for (int j = 0; j < boneNames.length; j++) {
-                kf.rotations[j] = rots.get(j);
-                kf.translations[j] = locs.get(j);
-            }
-            keyframes[i] = kf;
+        boolean looping;
+        if (loopOverride != null) {
+            looping = loopOverride;
+        } else {
+            looping = frameStrings.size() > 1 && lastFrameNum == firstFrameNum;
         }
 
-        float duration = frameCount > 1 ? keyframes[frameCount - 1].time : 0f;
+        int rawCount = frameStrings.size();
+        List<Quaternion[]> allRots = new ArrayList<>(rawCount);
+        List<Vector3f[]> allLocs = new ArrayList<>(rawCount);
+
+        for (int i = 0; i < rawCount; i++) {
+            List<String> names = new ArrayList<>();
+            List<Quaternion> rots = new ArrayList<>();
+            List<Vector3f> locs = new ArrayList<>();
+            parseBones(frameStrings.get(i), names, rots, locs);
+
+            if (boneNames == null) {
+                boneNames = names.toArray(new String[0]);
+            }
+
+            allRots.add(rots.toArray(new Quaternion[0]));
+            allLocs.add(locs.toArray(new Vector3f[0]));
+        }
+
+        int totalBones = boneNames.length;
+
+        List<Keyframe> expanded = new ArrayList<>();
+        float currentTime = 0f;
+
+        if (loopOverride != null && looping) {
+            expanded.add(new Keyframe(0f, totalBones));
+            for (int j = 0; j < totalBones; j++) {
+                expanded.get(0).rotations[j] = allRots.get(1)[j];
+                expanded.get(0).translations[j] = allLocs.get(1)[j];
+            }
+
+            for (int i = 1; i < rawCount - 1; i++) {
+                int steps = frameMeta.get(i)[1];
+                if (steps <= 0) continue;
+
+                for (int step = 1; step <= steps; step++) {
+                    float t = (float) step / steps;
+                    currentTime += 1f / fps;
+
+                    Keyframe kf = new Keyframe(currentTime, totalBones);
+                    for (int j = 0; j < totalBones; j++) {
+                        Quaternion q = new Quaternion();
+                        q.slerp(allRots.get(i)[j], allRots.get(i + 1)[j], t);
+                        kf.rotations[j] = q;
+
+                        Vector3f s = allLocs.get(i)[j];
+                        Vector3f e = allLocs.get(i + 1)[j];
+                        kf.translations[j] = new Vector3f(
+                            s.x + (e.x - s.x) * t,
+                            s.y + (e.y - s.y) * t,
+                            s.z + (e.z - s.z) * t
+                        );
+                    }
+                    expanded.add(kf);
+                }
+            }
+
+            int last = rawCount - 1;
+            int loopSteps = frameMeta.get(0)[1];
+            for (int step = 1; step <= loopSteps; step++) {
+                float t = (float) step / loopSteps;
+                currentTime += 1f / fps;
+
+                Keyframe kf = new Keyframe(currentTime, totalBones);
+                for (int j = 0; j < totalBones; j++) {
+                    Quaternion q = new Quaternion();
+                    q.slerp(allRots.get(last)[j], allRots.get(1)[j], t);
+                    kf.rotations[j] = q;
+
+                    Vector3f s = allLocs.get(last)[j];
+                    Vector3f e = allLocs.get(1)[j];
+                    kf.translations[j] = new Vector3f(
+                        s.x + (e.x - s.x) * t,
+                        s.y + (e.y - s.y) * t,
+                        s.z + (e.z - s.z) * t
+                    );
+                }
+                expanded.add(kf);
+            }
+
+        } else {
+            expanded.add(new Keyframe(0f, totalBones));
+            for (int j = 0; j < totalBones; j++) {
+                expanded.get(0).rotations[j] = allRots.get(0)[j];
+                expanded.get(0).translations[j] = allLocs.get(0)[j];
+            }
+
+            for (int i = 0; i < rawCount - 1; i++) {
+                int delta = frameMeta.get(i + 1)[1];
+                if (delta <= 0) continue;
+
+                for (int step = 1; step <= delta; step++) {
+                    float t = (float) step / delta;
+                    currentTime += 1f / fps;
+
+                    Keyframe kf = new Keyframe(currentTime, totalBones);
+                    for (int j = 0; j < totalBones; j++) {
+                        Quaternion q = new Quaternion();
+                        q.slerp(allRots.get(i)[j], allRots.get(i + 1)[j], t);
+                        kf.rotations[j] = q;
+
+                        Vector3f s = allLocs.get(i)[j];
+                        Vector3f e = allLocs.get(i + 1)[j];
+                        kf.translations[j] = new Vector3f(
+                            s.x + (e.x - s.x) * t,
+                            s.y + (e.y - s.y) * t,
+                            s.z + (e.z - s.z) * t
+                        );
+                    }
+                    expanded.add(kf);
+                }
+            }
+
+            if (looping && expanded.size() > 1) {
+                currentTime += 1f / fps;
+                Keyframe kf = new Keyframe(currentTime, totalBones);
+                for (int j = 0; j < totalBones; j++) {
+                    kf.rotations[j] = expanded.get(0).rotations[j].clone();
+                    kf.translations[j] = expanded.get(0).translations[j].clone();
+                }
+                expanded.add(kf);
+            }
+        }
+
+        Keyframe[] keyframes = expanded.toArray(new Keyframe[0]);
+
+        for (Keyframe kf : keyframes) {
+            for (int j = 0; j < totalBones; j++) {
+                if (kf.rotations[j] != null) kf.rotations[j].normalizeLocal();
+            }
+        }
+
+        float duration = keyframes.length > 1 ? keyframes[keyframes.length - 1].time : 0f;
 
         return new AnimationClip(name, duration, looping, boneNames, keyframes);
+    }
+
+    private static Boolean extractLoopFlag(String json) {
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"loop\"\\s*:\\s*(true|false)");
+        java.util.regex.Matcher m = p.matcher(json);
+        if (m.find()) {
+            return m.group(1).equals("true");
+        }
+        return null;
+    }
+
+    private static float extractFps(String json) {
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"fps\"\\s*:\\s*([\\d.]+)");
+        java.util.regex.Matcher m = p.matcher(json);
+        if (m.find()) {
+            try {
+                return Float.parseFloat(m.group(1));
+            } catch (NumberFormatException e) {
+                return 0f;
+            }
+        }
+        return 0f;
     }
 
     private static void parseFrames(String json, List<String> outStrings, List<int[]> outMeta) {
@@ -176,7 +318,7 @@ public class AnimationClip {
             float lz = Float.parseFloat(locParts[2].trim());
 
             names.add(boneName);
-            rots.add(blenderToJme(new Quaternion(x, y, z, w)));
+            rots.add(new Quaternion(x, y, z, w));
             locs.add(new Vector3f(lx, ly, lz));
             count++;
         }
@@ -186,9 +328,5 @@ public class AnimationClip {
         java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"" + key + "\"\\s*:\\s*(-?\\d+)");
         java.util.regex.Matcher m = p.matcher(obj);
         return m.find() ? Integer.parseInt(m.group(1)) : 0;
-    }
-
-    private static Quaternion blenderToJme(Quaternion q) {
-        return new Quaternion(q.getX(), q.getZ(), -q.getY(), q.getW());
     }
 }
