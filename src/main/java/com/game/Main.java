@@ -5,12 +5,15 @@ import com.game.character.CharacterFactory;
 import com.game.character.PlayerController;
 import com.game.character.ProceduralHumanoid;
 import com.game.character.SkeletonAnimator;
+import com.game.world.EnvironmentSetup;
 import com.game.world.SceneSetup;
 import com.game.world.TrainingDummy;
 import com.jme3.anim.AnimComposer;
 import com.jme3.app.SimpleApplication;
 import com.jme3.bullet.BulletAppState;
 import com.jme3.bullet.control.RigidBodyControl;
+import com.jme3.light.AmbientLight;
+import com.jme3.light.DirectionalLight;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.Vector3f;
@@ -71,7 +74,7 @@ public class Main extends SimpleApplication {
 
         // Ground
         Material groundMat = new Material(assetManager, "Common/MatDefs/Light/PBRLighting.j3md");
-        groundMat.setColor("BaseColor", new ColorRGBA(0.30f, 0.35f, 0.30f, 1f));
+        groundMat.setColor("BaseColor", new ColorRGBA(0.45f, 0.50f, 0.45f, 1f));
         groundMat.setFloat("Metallic", 0f);
         groundMat.setFloat("Roughness", 0.9f);
 
@@ -103,15 +106,37 @@ public class Main extends SimpleApplication {
         dummy = new TrainingDummy(assetManager);
         dummy.getCharacter().setLocalTranslation(-3f, 0f, 0f);
         rootNode.attachChild(dummy.getCharacter());
+        dummy.getHumanoid().enableShadows();
 
         // Graphics settings — applies high-quality shadows, tone mapping, sky
         gfx = new GraphicsSettings(this);
-        gfx.setHighShadows(true, 2048, 4);
+        gfx.setHighShadows(true, 2048, 3);
         gfx.setToneMapping(true);
         gfx.setFxaa(true);
         gfx.setBloom(false);
-        gfx.setSky(false);
+        gfx.setSky(true);
         gfx.apply();
+
+        // Environment lighting — LightProbe disabled (caused positional lighting shifts)
+        // EnvironmentSetup.setup(this, rootNode);
+
+        // ========== DIAGNOSTIC OVER-LIT TEST ==========
+        // Uncomment the block below AND comment out SceneSetup.apply() above
+        // to test whether lighting is the primary problem.
+        // If character looks correct → lighting IS the problem (fix lighting).
+        // If character still looks metallic → materials/textures are the problem.
+        /*
+        rootNode.addLight(new AmbientLight(new ColorRGBA(0.5f, 0.5f, 0.5f, 1f)));
+        rootNode.addLight(new DirectionalLight(
+            new Vector3f(-0.3f, -0.3f, -0.4f).normalizeLocal(),
+            new ColorRGBA(0.8f, 0.8f, 0.8f, 1f)));
+        rootNode.addLight(new DirectionalLight(
+            new Vector3f(0.4f, 0.0f, 0.6f).normalizeLocal(),
+            new ColorRGBA(0.6f, 0.6f, 0.7f, 1f)));
+        gfx.setSky(false);
+        gfx.setToneMapping(true);
+        */
+        // =============================================
 
         // Camera — initial position (modelHeight measured on first frame)
         flyCam.setEnabled(false);

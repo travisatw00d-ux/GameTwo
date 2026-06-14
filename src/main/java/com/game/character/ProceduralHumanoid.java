@@ -24,12 +24,14 @@ public class ProceduralHumanoid {
     private final Node characterNode;
     private final Node armatureNode;
     private final HumanoidRig rig;
+    private final AssetManager assetManager;
 
-    public ProceduralHumanoid(Spatial model) {
-        this(model, null);
+    public ProceduralHumanoid(Spatial model, AssetManager assetManager) {
+        this(model, null, assetManager);
     }
 
-    public ProceduralHumanoid(Spatial model, CharacterDNA dna) {
+    public ProceduralHumanoid(Spatial model, CharacterDNA dna, AssetManager assetManager) {
+        this.assetManager = assetManager;
 
         if (!(model instanceof Node rootNode)) {
             throw new IllegalArgumentException("Model must be a Node (scene graph root)");
@@ -41,25 +43,16 @@ public class ProceduralHumanoid {
         }
 
         Armature armature = skinControl.getArmature();
-        System.out.println("Armature joints: " + armature.getJointList().size());
-        for (Joint j : armature.getJointList()) {
-            System.out.println("  Joint: " + j.getName() + " (id=" + j.getId() + ")");
-        }
-
+        System.out.println("Armature: " + armature.getJointList().size() + " joints");
         rig = new HumanoidRig(armature);
 
-        // DEBUG: print loaded joint rotations to verify rest pose
-        System.out.println("=== Joint rest-pose rotations ===");
-        String[] checkJoints = {"Root", "Hips", "Spine", "Chest", "Neck", "Head",
-            "Clavicle.L", "Upper_Arm.L",             "Lower_Arm.L", "Hand.L",
-            "Clavicle.R", "Upper_Arm.R", "Lower_Arm.R", "Hand.R"};
+        // Quick validation: check core joints exist
+        String[] checkJoints = {"RL_BoneRoot", "CC_Base_Hip", "CC_Base_Spine01", "CC_Base_Head",
+            "CC_Base_L_Upperarm", "CC_Base_L_Hand", "CC_Base_L_Thigh", "CC_Base_L_Foot",
+            "CC_Base_R_Upperarm", "CC_Base_R_Hand", "CC_Base_R_Thigh", "CC_Base_R_Foot"};
         for (String name : checkJoints) {
-            Joint j = armature.getJoint(name);
-            if (j != null) {
-                com.jme3.math.Quaternion q = j.getLocalRotation();
-                System.out.println("  " + name + ": [" + q.getX() + ", " + q.getY() + ", " + q.getZ() + ", " + q.getW() + "]");
-            } else {
-                System.out.println("  " + name + ": JOINT NOT FOUND");
+            if (armature.getJoint(name) == null) {
+                System.err.println("WARNING: Core joint '" + name + "' not found in armature!");
             }
         }
 
@@ -72,14 +65,32 @@ public class ProceduralHumanoid {
         this.armatureNode = findArmatureNode(rootNode);
     }
 
-    private static void fixMaterials(Spatial spatial) {
+    private void fixMaterials(Spatial spatial) {
         if (spatial instanceof Geometry g) {
             com.jme3.material.Material mat = g.getMaterial();
             if (mat != null && mat.getMaterialDef() != null) {
                 String def = mat.getMaterialDef().getName();
                 if (def != null && def.contains("PBR")) {
                     mat.setFloat("Metallic", 0.0f);
-                    mat.setFloat("Roughness", 0.8f);
+                    String name = g.getName();
+                    float roughness = guessRoughness(name);
+                    mat.setFloat("Roughness", roughness);
+
+                    com.jme3.material.MatParamTexture normalParam = mat.getTextureParam("NormalMap");
+                    boolean needsNormal = normalParam == null || normalParam.getTextureValue() == null;
+                    if (needsNormal && assetManager != null) {
+                        try {
+                            String texName = name.replace("mesh", "mat");
+                            com.jme3.texture.Texture normalTex = assetManager.loadTexture(
+                                "Models/MainCharRigged.fbm/" + texName + "_Normal.png");
+                            mat.setTexture("NormalMap", normalTex);
+                            System.out.println("  Set NormalMap from " + texName + "_Normal.png");
+                        } catch (Exception e) {
+                            System.err.println("  Failed to load normal map: " + e.getMessage());
+                        }
+                    }
+
+                    logMaterial(g, mat);
                 }
             }
         }
@@ -88,6 +99,47 @@ public class ProceduralHumanoid {
                 fixMaterials(child);
             }
         }
+    }
+
+    private void logMaterial(Geometry g, com.jme3.material.Material mat) {
+        System.out.println("Material: " + g.getName());
+        System.out.println("  Def: " + mat.getMaterialDef().getName());
+        Object metallic = mat.getParamValue("Metallic");
+        System.out.println("  Metallic: " + (metallic != null ? metallic : "default"));
+        Object roughness = mat.getParamValue("Roughness");
+        System.out.println("  Roughness: " + (roughness != null ? roughness : "default"));
+        System.out.println("  NormalMap: " + textureParamStr(mat.getTextureParam("NormalMap")));
+        System.out.println("  MetallicRoughnessMap: " + textureParamStr(mat.getTextureParam("MetallicRoughnessMap")));
+        System.out.println("  LightMap: " + textureParamStr(mat.getTextureParam("LightMap")));
+    }
+
+    private static String textureParamStr(com.jme3.material.MatParamTexture param) {
+        if (param == null) return "absent";
+        if (param.getTextureValue() == null) return "broken";
+        com.jme3.asset.AssetKey key = param.getTextureValue().getKey();
+        if (key == null) return "loaded (no key)";
+        return key.toString();
+    }
+
+    private static float guessRoughness(String name) {
+        if (name == null) return 0.7f;
+        String lower = name.toLowerCase();
+        if (lower.contains("eye") || lower.contains("glass") || lower.contains("gloss")
+            || lower.contains("gem") || lower.contains("metal")) return 0.1f;
+        if (lower.contains("skin") || lower.contains("body") || lower.contains("head")
+            || lower.contains("face") || lower.contains("hand") || lower.contains("arm")
+            || lower.contains("leg") || lower.contains("neck") || lower.contains("ear")
+            || lower.contains("nose") || lower.contains("mouth") || lower.contains("torso")) return 0.75f;
+        if (lower.contains("hair") || lower.contains("eyebrow") || lower.contains("lash")
+            || lower.contains("beard") || lower.contains("fur")) return 0.55f;
+        if (lower.contains("cloth") || lower.contains("fabric") || lower.contains("shirt")
+            || lower.contains("pant") || lower.contains("coat") || lower.contains("jacket")
+            || lower.contains("boot") || lower.contains("shoe") || lower.contains("sock")
+            || lower.contains("belt") || lower.contains("sleeve") || lower.contains("collar")
+            || lower.contains("jean") || lower.contains("dress") || lower.contains("skirt"))
+            return 0.85f;
+        if (lower.contains("mat") || lower.contains("tripo")) return 0.75f;
+        return 0.7f;
     }
 
     public void attachHair(AssetManager am, String modelPath) {

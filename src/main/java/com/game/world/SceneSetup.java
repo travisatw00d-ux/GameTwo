@@ -13,23 +13,28 @@ import com.jme3.renderer.queue.RenderQueue.ShadowMode;
 public class SceneSetup {
 
     public static void apply(SimpleApplication app) {
-        AmbientLight ambient = new AmbientLight(new ColorRGBA(0.50f, 0.50f, 0.55f, 1f));
+        AmbientLight ambient = new AmbientLight(new ColorRGBA(1.50f, 1.45f, 1.35f, 1f));
         app.getRootNode().addLight(ambient);
 
         DirectionalLight sun = new DirectionalLight(
-                new Vector3f(-0.4f, -0.7f, -0.3f).normalizeLocal(),
-                new ColorRGBA(1.50f, 1.45f, 1.35f, 1f));
+                new Vector3f(0.1f, -0.5f, 0.85f).normalizeLocal(),
+                new ColorRGBA(2.20f, 2.10f, 1.90f, 1f));
         app.getRootNode().addLight(sun);
 
         DirectionalLight fill = new DirectionalLight(
-                new Vector3f(0.3f, -0.2f, 0.5f).normalizeLocal(),
-                new ColorRGBA(0.50f, 0.55f, 0.65f, 1f).multLocal(0.5f));
+                new Vector3f(-0.3f, -0.2f, -0.9f).normalizeLocal(),
+                new ColorRGBA(0.40f, 0.45f, 0.50f, 1f));
         app.getRootNode().addLight(fill);
+
+        DirectionalLight bounce = new DirectionalLight(
+                new Vector3f(0f, 1f, 0f).normalizeLocal(),
+                new ColorRGBA(0.35f, 0.30f, 0.25f, 1f));
+        app.getRootNode().addLight(bounce);
 
         DirectionalLightShadowRenderer dlsr =
                 new DirectionalLightShadowRenderer(app.getAssetManager(), 1024, 3);
         dlsr.setLight(sun);
-        dlsr.setShadowIntensity(0.5f);
+        dlsr.setShadowIntensity(0.4f);
         app.getViewPort().addProcessor(dlsr);
     }
 

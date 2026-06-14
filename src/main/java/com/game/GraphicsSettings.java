@@ -5,6 +5,7 @@ import com.jme3.post.FilterPostProcessor;
 import com.jme3.post.filters.BloomFilter;
 import com.jme3.post.filters.FXAAFilter;
 import com.jme3.post.filters.ToneMapFilter;
+import com.jme3.post.ssao.SSAOFilter;
 import com.jme3.renderer.queue.RenderQueue;
 import com.jme3.shadow.DirectionalLightShadowRenderer;
 import com.jme3.texture.Texture;
@@ -16,6 +17,7 @@ public class GraphicsSettings {
     private boolean toneMapping = true;
     private boolean fxaa = true;
     private boolean bloom = false;
+    private boolean ssao = true;
     private boolean sky = true;
     private float resolutionScale = 1.0f;
 
@@ -38,6 +40,7 @@ public class GraphicsSettings {
     public void setToneMapping(boolean v) { toneMapping = v; }
     public void setFxaa(boolean v) { fxaa = v; }
     public void setBloom(boolean v) { bloom = v; }
+    public void setSsao(boolean v) { ssao = v; }
     public void setSky(boolean v) { sky = v; }
     public void setResolutionScale(float v) { resolutionScale = Math.max(1f, v); }
 
@@ -72,7 +75,7 @@ public class GraphicsSettings {
                 shadowRenderer = new DirectionalLightShadowRenderer(
                     app.getAssetManager(), size, splits);
                 shadowRenderer.setLight(dl);
-                shadowRenderer.setShadowIntensity(0.6f);
+                shadowRenderer.setShadowIntensity(0.2f);
                 app.getViewPort().addProcessor(shadowRenderer);
                 break;
             }
@@ -128,6 +131,11 @@ public class GraphicsSettings {
             BloomFilter bf = new BloomFilter(BloomFilter.GlowMode.Objects);
             bf.setBloomIntensity(1.2f);
             fpp.addFilter(bf);
+            active = true;
+        }
+        if (ssao) {
+            SSAOFilter ssaoFilter = new SSAOFilter(5f, 0.7f, 1f, 0.02f);
+            fpp.addFilter(ssaoFilter);
             active = true;
         }
         if (active) {
